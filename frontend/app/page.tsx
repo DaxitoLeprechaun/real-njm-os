@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { AgentLogStream, DEMO_EVENTS } from "@/components/AgentLogStream";
+import { StateOrchestrator, DEMO_STATE } from "@/components/StateOrchestrator";
+import { CEOShield, DEMO_HITL_PAYLOAD } from "@/components/CEOShield";
 
 interface ArchivoCowork {
   nombre_archivo: string;
@@ -230,9 +233,21 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [tarjeta, setTarjeta] = useState<TarjetaData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shieldOpen, setShieldOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Simulated async HITL callbacks — replace with real fetch to backend
+  const handleApprove = useCallback(async (interruptId: string) => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1200));
+    console.log("HITL APPROVED", interruptId);
+  }, []);
+
+  const handleReject = useCallback(async (interruptId: string, reason: string) => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 1200));
+    console.log("HITL REJECTED", interruptId, reason);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -391,7 +406,67 @@ export default function Home() {
             <TarjetaCard data={tarjeta} />
           </section>
         )}
+
+        <section className="space-y-2">
+          <div className="flex items-center gap-4">
+            <p className="font-mono uppercase flex-shrink-0" style={{ fontSize: "10px", letterSpacing: "0.15em", color: "var(--text-tertiary)" }}>
+              Agent Log Stream — Demo
+            </p>
+            <div aria-hidden="true" style={{ flex: 1, borderTop: "1px solid var(--border)" }} />
+          </div>
+          <AgentLogStream
+            events={DEMO_EVENTS}
+            label="NJM OS / AGENTE PM"
+            toolsCollapsed={false}
+            autoScroll={true}
+            style={{ height: "480px" }}
+          />
+        </section>
+
+        <section className="space-y-2">
+          <div className="flex items-center gap-4">
+            <p className="font-mono uppercase flex-shrink-0" style={{ fontSize: "10px", letterSpacing: "0.15em", color: "var(--text-tertiary)" }}>
+              State Orchestrator — Demo
+            </p>
+            <div aria-hidden="true" style={{ flex: 1, borderTop: "1px solid var(--border)" }} />
+          </div>
+          <StateOrchestrator
+            state={DEMO_STATE}
+            showSnapshots={true}
+            style={{ height: "520px" }}
+          />
+        </section>
+
+        <section className="space-y-2">
+          <div className="flex items-center gap-4">
+            <p className="font-mono uppercase flex-shrink-0" style={{ fontSize: "10px", letterSpacing: "0.15em", color: "var(--text-tertiary)" }}>
+              Escudo CEO — HITL Interrupt
+            </p>
+            <div aria-hidden="true" style={{ flex: 1, borderTop: "1px solid var(--border)" }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <button
+              type="button"
+              onClick={() => setShieldOpen(true)}
+              className="btn-action btn-err"
+            >
+              SIMULAR INTERRUPCIÓN HITL
+            </button>
+            <span className="font-mono" style={{ fontSize: "10px", color: "var(--text-tertiary)" }}>
+              Activa el Escudo del CEO con el payload demo
+            </span>
+          </div>
+        </section>
       </main>
+
+      {shieldOpen && (
+        <CEOShield
+          payload={DEMO_HITL_PAYLOAD}
+          onApprove={handleApprove}
+          onReject={handleReject}
+          onDismiss={() => setShieldOpen(false)}
+        />
+      )}
     </div>
   );
 }
