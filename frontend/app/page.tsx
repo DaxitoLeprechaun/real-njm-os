@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-// ── Types (espejo del contrato TARJETA_SUGERENCIA_UI del backend) ──────────
 interface ArchivoCowork {
   nombre_archivo: string;
   ruta_absoluta: string;
@@ -30,137 +29,184 @@ interface AccionUI {
 interface TarjetaData {
   id_transaccion: string;
   estado_ejecucion: "LISTO_PARA_FIRMA" | "BLOQUEO_CEO";
-  metadata: {
-    skill_utilizada: string;
-    timestamp_generacion: string;
-  };
+  metadata: { skill_utilizada: string; timestamp_generacion: string };
   contenido_tarjeta: ContenidoTarjeta;
   acciones_ui_disponibles: AccionUI[];
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
 function formatTimestamp(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("es-MX", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
+    return new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
   } catch {
     return iso;
   }
 }
 
-const BOTON_CLASES: Record<AccionUI["variante_visual"], string> = {
-  primario_success:
-    "bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors text-sm",
-  secundario_outline:
-    "border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-medium px-5 py-2.5 rounded-lg transition-colors text-sm",
-  peligro_rojo:
-    "bg-red-600 hover:bg-red-700 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors text-sm",
+function shortId(id: string): string {
+  return id.split("-")[0].toUpperCase();
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="font-mono uppercase mb-2" style={{ fontSize: "10px", letterSpacing: "0.15em", color: "var(--text-tertiary)" }}>
+      {children}
+    </p>
+  );
+}
+
+function Divider() {
+  return <div style={{ borderTop: "1px solid var(--border)" }} />;
+}
+
+const BTN_CLASS: Record<AccionUI["variante_visual"], string> = {
+  primario_success:  "btn-action btn-ok",
+  secundario_outline: "btn-action btn-dim",
+  peligro_rojo:      "btn-action btn-err",
 };
 
-// ── Sub-componentes ────────────────────────────────────────────────────────
+const VARIANT = {
+  LISTO_PARA_FIRMA: { color: "var(--success)", label: "LISTO PARA FIRMA" },
+  BLOQUEO_CEO:      { color: "var(--danger)",  label: "BLOQUEO CEO — ESCUDO ACTIVO" },
+} as const;
 
-function TarjetaExito({ data }: { data: TarjetaData }) {
+function TarjetaCard({ data }: { data: TarjetaData }) {
+  const { color, label } = VARIANT[data.estado_ejecucion];
   const c = data.contenido_tarjeta;
+  const isSuccess = data.estado_ejecucion === "LISTO_PARA_FIRMA";
 
   return (
-    <div className="border border-emerald-200 bg-emerald-50 rounded-2xl overflow-hidden shadow-sm">
-      {/* Header verde */}
-      <div className="bg-emerald-600 px-6 py-4 flex items-center gap-3">
-        <span className="text-white text-2xl">✅</span>
-        <div>
-          <p className="text-white font-bold text-lg leading-tight">
-            LISTO PARA FIRMA
-          </p>
-          <p className="text-emerald-100 text-xs">
-            Skill:{" "}
-            <span className="font-mono font-semibold">
-              {data.metadata.skill_utilizada}
-            </span>{" "}
-            · {formatTimestamp(data.metadata.timestamp_generacion)}
-          </p>
-        </div>
-        <span className="ml-auto text-emerald-200 text-xs font-mono opacity-70">
-          #{data.id_transaccion.split("-")[0]}
+    <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderTop: `3px solid ${color}`, boxShadow: "2px 2px 0 oklch(0% 0 0)" }}>
+      <div className="flex items-center gap-3 px-5 py-3" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+        <span aria-hidden="true" className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+        <span className="font-mono font-semibold" style={{ fontSize: "11px", letterSpacing: "0.1em", color }}>
+          {label}
+        </span>
+        <span className="font-mono ml-auto" style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+          #{shortId(data.id_transaccion)}
+        </span>
+        <span className="font-mono" style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+          {formatTimestamp(data.metadata.timestamp_generacion)}
         </span>
       </div>
 
-      <div className="p-6 space-y-5">
-        {/* Propuesta principal */}
-        <div className="bg-white rounded-xl border border-emerald-100 p-4">
-          <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-1">
-            Propuesta
-          </p>
-          <p className="text-gray-900 text-base font-medium leading-snug">
+      <div className="px-5 py-2" style={{ borderBottom: "1px solid var(--border)" }}>
+        <span className="font-mono" style={{ fontSize: "10px", color: "var(--text-tertiary)" }}>
+          skill: <span style={{ color: "var(--text-secondary)" }}>{data.metadata.skill_utilizada}</span>
+        </span>
+      </div>
+
+      <div className="p-5 space-y-5">
+        <div>
+          <FieldLabel>{isSuccess ? "Propuesta" : "Motivo del Bloqueo"}</FieldLabel>
+          <p className="font-serif" style={{ fontSize: "18px", color: "var(--text-primary)", lineHeight: 1.75, fontWeight: 500 }}>
             {c.propuesta_principal}
           </p>
         </div>
 
-        {/* Framework + Check ADN en fila */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="bg-white rounded-xl border border-emerald-100 p-4">
-            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-1">
-              Framework Metodológico
-            </p>
-            <p className="text-gray-700 text-sm">{c.framework_metodologico}</p>
-          </div>
+        <Divider />
 
-          <div className="bg-white rounded-xl border border-emerald-100 p-4">
-            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-1">
-              Check de Coherencia ADN
-            </p>
-            <div className="flex items-start gap-2 mt-1">
-              <span className="text-lg leading-none">
-                {c.check_coherencia_adn.aprobado ? "✅" : "⚠️"}
-              </span>
-              <p className="text-gray-700 text-sm leading-snug">
-                {c.check_coherencia_adn.justificacion}
+        {isSuccess ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div>
+              <FieldLabel>Framework Metodológico</FieldLabel>
+              <p className="font-serif" style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.65 }}>
+                {c.framework_metodologico}
               </p>
             </div>
+            <div>
+              <FieldLabel>Check de Coherencia ADN</FieldLabel>
+              <div className="flex items-start gap-2">
+                <span className="font-mono font-bold flex-shrink-0" style={{ fontSize: "18px", lineHeight: 1, color: c.check_coherencia_adn.aprobado ? "var(--success)" : "var(--danger)" }}>
+                  {c.check_coherencia_adn.aprobado ? "✓" : "✗"}
+                </span>
+                <p className="font-serif" style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.65 }}>
+                  {c.check_coherencia_adn.justificacion}
+                </p>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <>
+            <div>
+              <FieldLabel>Check de Coherencia ADN</FieldLabel>
+              <div className="flex items-start gap-2">
+                <span className="font-mono font-bold flex-shrink-0" style={{ fontSize: "18px", lineHeight: 1, color: "var(--danger)" }}>✗</span>
+                <p className="font-serif" style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.65 }}>
+                  {c.check_coherencia_adn.justificacion}
+                </p>
+              </div>
+            </div>
 
-        {/* Archivos generados */}
-        {c.archivos_locales_cowork.length > 0 && (
-          <div className="bg-white rounded-xl border border-emerald-100 p-4">
-            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-3">
-              Entregables Generados en Claude Cowork
-            </p>
-            <ul className="space-y-2">
-              {c.archivos_locales_cowork.map((archivo) => (
-                <li key={archivo.ruta_absoluta}>
-                  <a
-                    href={archivo.ruta_absoluta}
-                    className="flex items-center gap-2 group text-sm text-emerald-700 hover:text-emerald-900 transition-colors"
-                  >
-                    <span className="text-base">📄</span>
-                    <span className="font-mono font-medium group-hover:underline underline-offset-2">
-                      {archivo.nombre_archivo}
-                    </span>
-                    <span className="text-emerald-400 text-xs ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                      Abrir →
-                    </span>
-                  </a>
-                  <p className="text-gray-400 text-xs font-mono ml-6 truncate">
-                    {archivo.ruta_absoluta}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </div>
+            {c.log_errores_escalamiento.length > 0 && (
+              <>
+                <Divider />
+                <div>
+                  <FieldLabel>Registro de Errores</FieldLabel>
+                  <div className="p-4 space-y-2" style={{ border: "1px solid var(--danger-border)", background: "var(--danger-bg)" }}>
+                    {c.log_errores_escalamiento.map((error, i) => (
+                      <div key={i} className="flex items-start gap-3">
+                        <span className="font-mono flex-shrink-0" style={{ fontSize: "10px", color: "var(--danger)", marginTop: "2px" }}>
+                          {String(i + 1).padStart(2, "0")}
+                        </span>
+                        <p className="font-mono" style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                          {error}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            <Divider />
+
+            <div>
+              <FieldLabel>Protocolo Activo</FieldLabel>
+              <p className="font-serif" style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: 1.65 }}>
+                {c.framework_metodologico}
+              </p>
+            </div>
+          </>
         )}
 
-        {/* Botones de acción */}
-        <div className="flex flex-wrap gap-3 pt-1">
+        {isSuccess && c.archivos_locales_cowork.length > 0 && (
+          <>
+            <Divider />
+            <div>
+              <FieldLabel>Entregables — Claude Cowork</FieldLabel>
+              <ul className="space-y-2">
+                {c.archivos_locales_cowork.map((archivo) => (
+                  <li key={archivo.ruta_absoluta}>
+                    <a
+                      href={archivo.ruta_absoluta}
+                      className="font-mono hover-text-primary flex items-center gap-2"
+                      style={{ fontSize: "12px", textDecoration: "none" }}
+                    >
+                      <span style={{ color: "var(--text-tertiary)" }}>→</span>
+                      <span style={{ textDecoration: "underline", textUnderlineOffset: "3px" }}>{archivo.nombre_archivo}</span>
+                    </a>
+                    <p className="font-mono ml-4 mt-0.5 truncate" style={{ fontSize: "10px", color: "var(--text-tertiary)" }}>
+                      {archivo.ruta_absoluta}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
+        )}
+
+      </div>
+
+      <div style={{ background: "var(--bg-raised)", borderTop: "2px solid var(--border)", padding: "16px 20px" }}>
+        <p className="font-mono uppercase mb-3" style={{ fontSize: "9px", letterSpacing: "0.2em", color: "var(--text-tertiary)" }}>
+          Decisión Requerida
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
           {data.acciones_ui_disponibles.map((accion) => (
             <button
               key={accion.accion_backend}
-              className={BOTON_CLASES[accion.variante_visual]}
-              onClick={() =>
-                alert(`Acción: ${accion.label}\nEndpoint: ${accion.accion_backend}`)
-              }
+              className={BTN_CLASS[accion.variante_visual]}
+              onClick={() => alert(`Acción: ${accion.label}\nEndpoint: ${accion.accion_backend}`)}
             >
               {accion.label}
             </button>
@@ -170,104 +216,6 @@ function TarjetaExito({ data }: { data: TarjetaData }) {
     </div>
   );
 }
-
-function TarjetaBloqueo({ data }: { data: TarjetaData }) {
-  const c = data.contenido_tarjeta;
-
-  return (
-    <div className="border border-red-200 bg-red-50 rounded-2xl overflow-hidden shadow-sm">
-      {/* Header rojo */}
-      <div className="bg-red-600 px-6 py-4 flex items-center gap-3">
-        <span className="text-white text-2xl">🚨</span>
-        <div>
-          <p className="text-white font-bold text-lg leading-tight">
-            BLOQUEO CEO
-          </p>
-          <p className="text-red-100 text-xs">
-            Skill:{" "}
-            <span className="font-mono font-semibold">
-              {data.metadata.skill_utilizada}
-            </span>{" "}
-            · {formatTimestamp(data.metadata.timestamp_generacion)}
-          </p>
-        </div>
-        <span className="ml-auto text-red-200 text-xs font-mono opacity-70">
-          #{data.id_transaccion.split("-")[0]}
-        </span>
-      </div>
-
-      <div className="p-6 space-y-5">
-        {/* Motivo de bloqueo */}
-        <div className="bg-white rounded-xl border border-red-100 p-4">
-          <p className="text-xs font-semibold text-red-700 uppercase tracking-wider mb-1">
-            Motivo del Bloqueo
-          </p>
-          <p className="text-gray-900 text-base font-medium leading-snug">
-            {c.propuesta_principal}
-          </p>
-        </div>
-
-        {/* Check ADN (fallido) */}
-        <div className="bg-white rounded-xl border border-red-100 p-4">
-          <p className="text-xs font-semibold text-red-700 uppercase tracking-wider mb-1">
-            Check de Coherencia ADN
-          </p>
-          <div className="flex items-start gap-2 mt-1">
-            <span className="text-lg leading-none">❌</span>
-            <p className="text-gray-700 text-sm leading-snug">
-              {c.check_coherencia_adn.justificacion}
-            </p>
-          </div>
-        </div>
-
-        {/* Log de errores */}
-        {c.log_errores_escalamiento.length > 0 && (
-          <div className="bg-red-900 rounded-xl p-4">
-            <p className="text-xs font-semibold text-red-300 uppercase tracking-wider mb-3">
-              Registro de Errores para el CEO
-            </p>
-            <ul className="space-y-2">
-              {c.log_errores_escalamiento.map((error, i) => (
-                <li
-                  key={i}
-                  className="flex items-start gap-2 text-sm text-red-100 font-mono"
-                >
-                  <span className="text-red-400 shrink-0 mt-0.5">›</span>
-                  <span className="leading-snug">{error}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Framework / Protocolo activo */}
-        <div className="bg-white rounded-xl border border-red-100 p-4">
-          <p className="text-xs font-semibold text-red-700 uppercase tracking-wider mb-1">
-            Protocolo Activo
-          </p>
-          <p className="text-gray-700 text-sm">{c.framework_metodologico}</p>
-        </div>
-
-        {/* Botones de acción */}
-        <div className="flex flex-wrap gap-3 pt-1">
-          {data.acciones_ui_disponibles.map((accion) => (
-            <button
-              key={accion.accion_backend}
-              className={BOTON_CLASES[accion.variante_visual]}
-              onClick={() =>
-                alert(`Acción: ${accion.label}\nEndpoint: ${accion.accion_backend}`)
-              }
-            >
-              {accion.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Componente principal ───────────────────────────────────────────────────
 
 const SUGERENCIAS = [
   "Genera un Business Case para lanzar una campaña de LinkedIn Ads en Q2",
@@ -282,10 +230,17 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [tarjeta, setTarjeta] = useState<TarjetaData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!peticion.trim()) return;
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setLoading(true);
     setTarjeta(null);
@@ -296,20 +251,20 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ peticion: peticion.trim() }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Error desconocido." }));
-        const detalle =
-          typeof err.detail === "object"
-            ? err.detail.detalle ?? JSON.stringify(err.detail)
-            : String(err.detail);
+        const detalle = typeof err.detail === "object"
+          ? err.detail.detalle ?? JSON.stringify(err.detail)
+          : String(err.detail);
         throw new Error(detalle);
       }
 
-      const data: TarjetaData = await res.json();
-      setTarjeta(data);
+      setTarjeta(await res.json());
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "Error de red. ¿Está corriendo el backend?");
     } finally {
       setLoading(false);
@@ -317,123 +272,124 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-900">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-gray-950 font-black text-sm">
-              N
-            </div>
-            <span className="font-bold text-white text-lg tracking-tight">
+    <div style={{ minHeight: "100vh", background: "var(--bg-base)" }}>
+      <header style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-surface)" }}>
+        <div className="max-w-5xl mx-auto px-6 flex items-center gap-4" style={{ height: "44px" }}>
+          <div className="flex items-center gap-3">
+            <span className="font-mono font-bold" style={{ fontSize: "11px", letterSpacing: "0.06em", padding: "2px 8px", background: "var(--text-primary)", color: "var(--bg-base)" }}>
               NJM OS
             </span>
+            <span className="font-mono" style={{ fontSize: "10px", letterSpacing: "0.12em", color: "var(--text-tertiary)" }}>AGENTE PM</span>
+            <span aria-hidden="true" style={{ color: "var(--border)", fontSize: "12px" }}>/</span>
+            <span className="font-mono" style={{ fontSize: "10px", letterSpacing: "0.12em", color: "var(--text-secondary)" }}>DISRUPT</span>
           </div>
-          <div className="h-5 w-px bg-gray-700" />
-          <span className="text-gray-400 text-sm">Agente PM · Disrupt</span>
           <div className="ml-auto flex items-center gap-2">
-            <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-            <span className="text-xs text-gray-400">Claude 3.5 Sonnet</span>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--success)" }} />
+            <span className="font-mono" style={{ fontSize: "10px", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>CLAUDE 3.5 SONNET</span>
           </div>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-10 space-y-8">
-        {/* Título */}
-        <div>
-          <h1 className="text-2xl font-bold text-white">
-            ¿Qué entregable necesitas hoy?
-          </h1>
-          <p className="text-gray-400 text-sm mt-1">
-            El Agente PM leerá el Libro Vivo de{" "}
-            <span className="text-emerald-400 font-medium">Disrupt</span> y
-            generará el documento metodológico correspondiente.
-          </p>
-        </div>
-
-        {/* Formulario */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <textarea
-            value={peticion}
-            onChange={(e) => setPeticion(e.target.value)}
-            placeholder="Ej: Genera un Business Case para lanzar una campaña de LinkedIn Ads en Q2..."
-            rows={4}
-            className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-gray-100 placeholder-gray-500 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-          />
-
-          {/* Sugerencias rápidas */}
-          <div className="flex flex-wrap gap-2">
-            {SUGERENCIAS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setPeticion(s)}
-                className="text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full transition-colors"
-              >
-                {s.slice(0, 45)}…
-              </button>
-            ))}
+      <main className="max-w-5xl mx-auto px-6 py-10 space-y-10">
+        <section>
+          <div className="mb-5">
+            <p className="font-mono uppercase mb-1" style={{ fontSize: "10px", letterSpacing: "0.15em", color: "var(--text-tertiary)" }}>
+              Nueva Petición — Agente PM
+            </p>
+            <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+              El Agente PM consultará el Libro Vivo de{" "}
+              <span style={{ color: "var(--text-primary)" }}>Disrupt</span>{" "}
+              y producirá el entregable metodológico correspondiente.
+            </p>
           </div>
 
-          <button
-            type="submit"
-            disabled={loading || !peticion.trim()}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold py-3 rounded-xl transition-colors text-sm flex items-center justify-center gap-2"
-          >
-            {loading ? (
-              <>
-                <svg
-                  className="animate-spin h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
-                El Agente PM está trabajando…
-              </>
-            ) : (
-              "Ejecutar Tarea →"
-            )}
-          </button>
-        </form>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div style={{ border: "1px solid var(--border)", background: "var(--bg-surface)" }}>
+              <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                <span className="font-mono" style={{ fontSize: "11px", color: "var(--success)" }}>›</span>
+                <span className="font-mono uppercase" style={{ fontSize: "9px", letterSpacing: "0.15em", color: "var(--text-tertiary)" }}>stdin</span>
+              </div>
+              <textarea
+                value={peticion}
+                onChange={(e) => setPeticion(e.target.value)}
+                placeholder="Describe el entregable o análisis estratégico que necesitas..."
+                rows={4}
+                aria-label="Petición al Agente PM"
+                className="input-mono font-mono w-full px-4 py-3 bg-transparent resize-none outline-none"
+                style={{ fontSize: "13px", color: "var(--text-primary)", caretColor: "var(--success)" }}
+              />
+            </div>
 
-        {/* Error de red / API */}
+            <div>
+              <p className="font-mono uppercase mb-2" style={{ fontSize: "9px", letterSpacing: "0.15em", color: "var(--text-tertiary)" }}>
+                Accesos rápidos
+              </p>
+              <div className="space-y-0.5">
+                {SUGERENCIAS.map((s, i) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setPeticion(s)}
+                    className="w-full text-left flex items-start gap-3"
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}
+                  >
+                    <span className="font-mono flex-shrink-0" style={{ fontSize: "10px", color: "var(--text-tertiary)", width: "20px", fontVariantNumeric: "tabular-nums", marginTop: "1px" }}>
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span className="font-mono hover-text-primary" style={{ fontSize: "12px", lineHeight: 1.5 }}>
+                      {s}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 pt-1">
+              <button
+                type="submit"
+                disabled={loading || !peticion.trim()}
+                className="font-mono uppercase"
+                style={{
+                  fontSize: "11px",
+                  letterSpacing: "0.1em",
+                  padding: "8px 20px",
+                  border: `1px solid ${!loading && peticion.trim() ? "var(--text-primary)" : "var(--border)"}`,
+                  background: !loading && peticion.trim() ? "var(--text-primary)" : "transparent",
+                  color: !loading && peticion.trim() ? "var(--bg-base)" : "var(--text-tertiary)",
+                  cursor: !loading && peticion.trim() ? "pointer" : "not-allowed",
+                  transition: "all 0.15s",
+                }}
+              >
+                {loading ? "EJECUTANDO..." : "EJECUTAR TAREA →"}
+              </button>
+              {loading && (
+                <span className="font-mono animate-pulse" style={{ fontSize: "10px", color: "var(--text-tertiary)" }}>
+                  Consultando Libro Vivo · Generando entregable
+                </span>
+              )}
+            </div>
+          </form>
+        </section>
+
         {error && (
-          <div className="bg-red-950 border border-red-800 rounded-xl px-5 py-4">
-            <p className="text-red-400 font-semibold text-sm">Error de conexión</p>
-            <p className="text-red-300 text-sm mt-1 font-mono">{error}</p>
+          <div className="px-5 py-4" style={{ border: "1px solid var(--danger-border)", borderTop: "2px solid var(--danger)", background: "var(--danger-bg)" }}>
+            <p className="font-mono uppercase mb-1" style={{ fontSize: "10px", letterSpacing: "0.12em", color: "var(--danger)" }}>
+              Error de Conexión
+            </p>
+            <p className="font-mono" style={{ fontSize: "12px", color: "var(--text-secondary)" }}>{error}</p>
           </div>
         )}
 
-        {/* Tarjeta de Sugerencia */}
         {tarjeta && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="h-px flex-1 bg-gray-800" />
-              <span className="text-xs text-gray-500 uppercase tracking-widest">
+          <section className="space-y-4">
+            <div className="flex items-center gap-4">
+              <p className="font-mono uppercase flex-shrink-0" style={{ fontSize: "10px", letterSpacing: "0.15em", color: "var(--text-tertiary)" }}>
                 Tarjeta de Sugerencia
-              </span>
-              <div className="h-px flex-1 bg-gray-800" />
+              </p>
+              <div aria-hidden="true" style={{ flex: 1, borderTop: "1px solid var(--border)" }} />
             </div>
-
-            {tarjeta.estado_ejecucion === "LISTO_PARA_FIRMA" ? (
-              <TarjetaExito data={tarjeta} />
-            ) : (
-              <TarjetaBloqueo data={tarjeta} />
-            )}
-          </div>
+            <TarjetaCard data={tarjeta} />
+          </section>
         )}
       </main>
     </div>
