@@ -1,0 +1,20 @@
+# NJM OS — Backend Dependencies
+# Requires Python 3.11+ (see ARCHITECTURE.md)
+
+# API
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+
+# LangChain / LangGraph
+langgraph==0.2.60
+langchain==0.3.13
+langchain-anthropic==0.3.3
+langchain-core>=0.3.30,<0.4.0
+
+# Data validation
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# Async / utilities
+python-dotenv==1.0.1
+httpx==0.28.1

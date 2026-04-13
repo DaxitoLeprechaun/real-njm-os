@@ -1,0 +1,115 @@
+{
+  "metadata": {
+    "nombre_marca": "Lumina Finance",
+    "fecha_ultima_firma": "2026-04-12T10:00:00Z",
+    "estado_auditoria": "COMPLETO_100%"
+  },
+  "vector_1_nucleo": {
+    "uvp": "La única app de finanzas personales que convierte tu historial bancario en un plan de ahorro ejecutable en menos de 5 minutos, garantizado o te devolvemos el mes.",
+    "posicionamiento": "Eje X: Complejidad vs. Automatización — territorio: Alta automatización / Precio accesible.",
+    "arquetipo_comunicacion": "Coach Financiero Empático: cercano, basado en datos reales del usuario, sin jerga bancaria.",
+    "lineas_rojas_marca": [
+      "No usar terminología financiera técnica sin explicación inmediata",
+      "No comparar con bancos tradicionales de forma agresiva o despectiva",
+      "No hacer promesas de rendimiento garantizado de inversiones"
+    ]
+  },
+  "vector_2_negocio": {
+    "unit_economics": {
+      "ticket_promedio_usd": 12.0,
+      "ltv_proyectado_usd": 144.0,
+      "cac_maximo_tolerable_usd": 28.0
+    },
+    "cash_conversion_cycle_dias": 7,
+    "modelo_pricing": "suscripcion",
+    "producto_estrella_bcg": "Plan Premium mensual con análisis predictivo de gastos",
+    "producto_vaca_lechera_bcg": "Plan Básico con categorización automática de transacciones",
+    "moats_economicos": [
+      "Modelo de ML propietario entrenado con 2M+ transacciones anonimizadas LATAM",
+      "Integraciones directas con 38 bancos mexicanos vía Open Banking"
+    ]
+  },
+  "vector_3_audiencia": {
+    "jtbd_funcional": "Tener control real de mis finanzas sin tener que llevar una hoja de Excel manualmente cada semana.",
+    "jtbd_socioemocional": "Sentir que soy un adulto financieramente responsable sin tener que ser experto en inversiones.",
+    "friccion_transaccional": "Desconfianza en conectar su cuenta bancaria a una app tercera — miedo a fraude o filtración de datos.",
+    "trigger_event": "El usuario acaba de recibir un estado de cuenta con gastos que no recuerda haber hecho, o acaba de tomar una deuda significativa.",
+    "criterio_desempate": "Reseñas de seguridad verificadas y presencia en medios de confianza (Forbes, El Financiero) que validen que la app es legítima."
+  },
+  "vector_4_competencia": {
+    "competidores_directos": [
+      {
+        "nombre": "Fintonic MX",
+        "vulnerabilidad_tactica": "UX anticuada y onboarding de más de 8 pasos que genera abandono masivo."
+      },
+      {
+        "nombre": "Spendee",
+        "vulnerabilidad_tactica": "Sin integración con bancos mexicanos — requiere ingreso manual de transacciones."
+      },
+      {
+        "nombre": "Mobills",
+        "vulnerabilidad_tactica": "Sin recomendaciones inteligentes — solo reporta gastos, no sugiere acciones."
+      }
+    ],
+    "amenaza_sustitutos": "Hoja de cálculo de Google Sheets con template gratuito — cero costo y máximo control para el usuario power.",
+    "tactica_a_disrumpir": "Todos usan notificaciones de gasto genéricas — nosotros usamos alertas predictivas 48 horas antes de que el usuario quede en números rojos."
+  },
+  "vector_5_infraestructura": {
+    "arquitectura_funnel": "Meta Ads / TikTok Ads / SEO orgánico → Landing page con demo interactiva → Trial gratis 14 días → Activación → Conversión a pago. Ciclo promedio: 14 días.",
+    "cuello_botella_funnel": "La tasa de activación (usuarios que conectan al menos un banco en los primeros 3 días) es del 32% — hay fricción severa en el paso de conexión bancaria.",
+    "presupuesto_pauta_mensual_usd": 4500.0,
+    "punto_quiebre_operativo": "Más de 50,000 usuarios activos simultáneos satura la infraestructura de Open Banking — requiere migración a arquitectura serverless antes de ese umbral.",
+    "deuda_tecnica_adquisicion": "El tracking de conversiones entre Meta Ads y el onboarding in-app está roto — atribución manual via UTMs inconsistentes.",
+    "activo_first_party_data": "Base de 180,000 emails de usuarios en lista de espera con intent score alto — capturados en campaña de pre-lanzamiento."
+  },
+  "vector_6_historico": {
+    "campañas_exitosas": [
+      {
+        "descripcion": "Campaña de contenido orgánico 'Reto Ahorro 30 días' en TikTok — Q1 2026",
+        "roi_observado": "3.8x en CAC vs. paid en el mismo período",
+        "diagnostico": "Formato de challenge con resultados reales de usuarios generó viralidad orgánica — UGC redujo costo de adquisición a $8 USD por descarga."
+      }
+    ],
+    "campañas_fallidas": [
+      {
+        "descripcion": "Google Search Ads con keywords genéricas 'app finanzas' — Q3 2025",
+        "roi_observado": "0.4x — CAC de $72 USD vs. techo de $28",
+        "diagnostico": "Intent demasiado amplio — usuarios buscaban apps de contabilidad empresarial, no finanzas personales. Audiencia incorrecta."
+      }
+    ],
+    "practicas_obsoletas": [
+      "Newsletter semanal con tips financieros genéricos que nadie abre (open rate 4%)",
+      "Webinars mensuales de educación financiera con promedio de 12 asistentes"
+    ]
+  },
+  "vector_7_objetivos": {
+    "north_star_metric": "Usuarios Activos Mensuales (MAU) con al menos una cuenta bancaria conectada y una sesión en los últimos 7 días.",
+    "objetivo_negocio_12_meses": "Escalar de 8,200 a 35,000 suscriptores de pago activos, alcanzando $420k ARR con churn mensual menor al 3%.",
+    "objetivo_tactico_trimestre": "Reducir la fricción en el paso de conexión bancaria de 32% a 55% de tasa de activación en Q2 2026, eliminando la deuda técnica de atribución y lanzando el flujo de onboarding rediseñado."
+  },
+  "vector_8_gobernanza": {
+    "zonas_rojas_compliance": [
+      "Cumplimiento estricto con Ley Fintech MX (CNBV) — licencia de ITF requerida para cualquier función de inversión",
+      "No almacenar credenciales bancarias — solo tokens OAuth de Open Banking",
+      "LFPDPPP: consentimiento explícito antes de cualquier análisis de datos transaccionales del usuario"
+    ],
+    "riesgo_pr": "Cualquier brecha de seguridad o filtración de datos bancarios destruiría irreversiblemente la confianza — el activo más frágil de una fintech en LATAM.",
+    "propiedad_intelectual_confidencial": "Modelo de ML de predicción de gastos y la base de datos de patrones transaccionales anonimizados por industria."
+  },
+  "vector_9_perfil_pm": {
+    "arquetipo_principal": "Growth_PM",
+    "matriz_habilidades": {
+      "enfoque_tecnico": 6,
+      "enfoque_negocio": 7,
+      "enfoque_usuario_ux": 9
+    },
+    "sesgo_metodologico": "Priorizar SIEMPRE la reducción de fricción en el funnel de activación sobre cualquier nueva feature. Un usuario que no activa nunca convierte. Toda decisión debe modelarse contra la tasa de activación y el churn mensual antes de aprobarse.",
+    "skills_especificas_activas": [
+      "generar_plan_demanda",
+      "generar_backlog_historias",
+      "generar_requisitos_usabilidad",
+      "evaluar_preparacion_lanzamiento",
+      "generar_business_case"
+    ]
+  }
+}
