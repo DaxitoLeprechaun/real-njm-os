@@ -8,9 +8,14 @@ const config: Config = {
   ],
   theme: {
     extend: {
-      colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+      fontFamily: {
+        sans:  ["var(--font-geist-sans)", "system-ui", "sans-serif"],
+        mono:  ["var(--font-geist-mono)", "ui-monospace", "monospace"],
+        serif: ["var(--font-spectral)", "Georgia", "serif"],
+      },
+      boxShadow: {
+        hard:    "2px 2px 0 oklch(0% 0 0)",
+        "hard-sm": "1px 1px 0 oklch(0% 0 0)",
       },
     },
   },

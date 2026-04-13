@@ -3,25 +3,124 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surfaces — warm-tinted near-black */
+  --bg-base:          oklch(9%  0.005 60);
+  --bg-surface:       oklch(13% 0.006 60);
+  --bg-raised:        oklch(17% 0.006 60);
+  --bg-hover:         oklch(20% 0.007 60);
+
+  /* Borders */
+  --border:           oklch(22% 0.005 60);
+  --border-subtle:    oklch(17% 0.005 60);
+
+  /* Text */
+  --text-primary:     oklch(93% 0.005 60);
+  --text-secondary:   oklch(55% 0.006 60);
+  --text-tertiary:    oklch(35% 0.005 60);
+
+  /* Functional — success */
+  --success:          oklch(72% 0.22 145);
+  --success-bg:       oklch(16% 0.04 145);
+  --success-border:   oklch(30% 0.10 145);
+
+  /* Functional — danger */
+  --danger:           oklch(50% 0.22 25);
+  --danger-bg:        oklch(14% 0.04 25);
+  --danger-border:    oklch(28% 0.10 25);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  font-kerning: normal;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+/* Hard shadow utilities */
+.shadow-hard    { box-shadow: 2px 2px 0 oklch(0% 0 0); }
+.shadow-hard-sm { box-shadow: 1px 1px 0 oklch(0% 0 0); }
+
+/* Hover color transition — replaces inline event handlers */
+.hover-text-primary { color: var(--text-secondary); transition: color 0.15s; }
+.hover-text-primary:hover { color: var(--text-primary); }
+
+/* Terminal input — focus ring replacement for outline-none */
+.input-mono:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--text-primary);
+}
+
+/* ── Action buttons ──────────────────────────────────────────────────────── */
+
+.btn-action {
+  font-family: var(--font-geist-mono);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.btn-action:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+/* Primary — success */
+.btn-ok {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  padding: 12px 24px;
+  border: 1px solid var(--success-border);
+  background: var(--success-bg);
+  color: var(--success);
+  box-shadow: 2px 2px 0 oklch(0% 0 0);
+}
+.btn-ok:hover {
+  background: var(--success);
+  color: var(--bg-base);
+  box-shadow: none;
+}
+
+/* Secondary */
+.btn-dim {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-dim:hover {
+  color: var(--text-primary);
+  border-color: var(--text-primary);
+}
+
+/* Primary — danger */
+.btn-err {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  padding: 12px 24px;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger);
+  box-shadow: 2px 2px 0 oklch(0% 0 0);
+}
+.btn-err:hover {
+  background: var(--danger);
+  color: var(--bg-base);
+  box-shadow: none;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse        { animation: none; }
+  .btn-action           { transition: none; }
+  .hover-text-primary   { transition: none; }
 }
