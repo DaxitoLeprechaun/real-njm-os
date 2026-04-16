@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import SlideOver from "@/components/njm/SlideOver";
+import AgentConsole from "@/components/njm/AgentConsole";
+import CEOShield from "@/components/njm/CEOShield";
+import { useAgentConsole } from "@/hooks/useAgentConsole";
 
 interface Artefacto {
   id: string;
@@ -176,12 +179,36 @@ Semana 11-12:  Retro + planning Q4
   },
 ];
 
+const PM_EXECUTION_SEQUENCE = [
+  "[✓] Iniciando Agente PM...",
+  "[✓] Cargando Libro Vivo — Vectores 1-9...",
+  "[⏳] Evaluando Framework Ansoff para táctica actual...",
+  "[✓] Alineación con Vector 2 (Modelo de Negocio): OK",
+  "[⏳] Analizando restricciones presupuestarias Vector 5...",
+  "[⏳] Calculando ROI estimado para campaña Q2...",
+  "[✓] ROI proyectado: 3.2x en 90 días (baseline conservador)",
+  "[⏳] Redactando Business Case — estructura 4-secciones...",
+  "[✓] Sección 1: Executive Summary — DONE",
+  "[✓] Sección 2: Análisis de Mercado — DONE",
+  "[⏳] Sección 3: Plan de Ejecución — generando milestones...",
+  "[✓] Sección 3: Plan de Ejecución — DONE",
+  "[✓] Sección 4: Métricas & KPIs — DONE",
+  "[✓] Business Case listo para revisión del CEO.",
+];
+
 export default function PMWorkspacePage({
   params,
 }: {
   params: { id: string };
 }) {
   const [activeArtefacto, setActiveArtefacto] = useState<Artefacto | null>(null);
+  const [shieldOpen, setShieldOpen] = useState(false);
+
+  const agentConsole = useAgentConsole();
+
+  function handleConsultarPM() {
+    agentConsole.invoke("pm-execution");
+  }
 
   return (
     <div className="p-8 pb-28 relative">
@@ -237,7 +264,7 @@ export default function PMWorkspacePage({
                     <span className="text-muted-foreground/60">Framework:</span>{" "}
                     {artefacto.framework}
                   </p>
-                  <p className="text-[11px] text-muted-foreground/40 mt-0.5">
+                  <p className="text[11px] text-muted-foreground/40 mt-0.5">
                     {artefacto.fecha}
                   </p>
                 </div>
@@ -250,6 +277,22 @@ export default function PMWorkspacePage({
             </p>
           </button>
         ))}
+      </div>
+
+      {/* Simulate CEO Block button — dev/test helper */}
+      <div className="mt-8 flex justify-center">
+        <button
+          onClick={() => setShieldOpen(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-mono font-semibold uppercase tracking-widest transition-all duration-150 hover:brightness-110 active:scale-[0.97]"
+          style={{
+            background: "rgb(225 29 72 / 0.1)",
+            border: "1px solid rgb(225 29 72 / 0.35)",
+            color: "rgb(251 113 133)",
+          }}
+        >
+          <span aria-hidden>🛡</span>
+          Simular Bloqueo CEO
+        </button>
       </div>
 
       {/* SlideOver: Document Viewer */}
@@ -275,9 +318,32 @@ export default function PMWorkspacePage({
         )}
       </SlideOver>
 
+      {/* Agent Console */}
+      <AgentConsole
+        open={agentConsole.open}
+        onClose={agentConsole.close}
+        agentLabel="PM Agent"
+        logs={agentConsole.logs}
+        running={agentConsole.running}
+      />
+
+      {/* CEO Shield Modal */}
+      <CEOShield
+        open={shieldOpen}
+        onOpenChange={setShieldOpen}
+        riskMessage="El presupuesto propuesto excede el límite del Vector 5. La táctica de expansión LATAM requiere aprobación antes de continuar la ejecución."
+        onApprove={() => {
+          agentConsole.invoke("ceo-approve");
+        }}
+        onReject={() => {
+          agentConsole.invoke("ceo-reject");
+        }}
+      />
+
       {/* Floating CTA */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
         <button
+          onClick={handleConsultarPM}
           className="pointer-events-auto flex items-center gap-2.5 px-7 py-3.5 rounded-full font-semibold text-sm text-white transition-all duration-200 hover:brightness-110 active:scale-[0.97]"
           style={{
             background: "hsl(var(--pm-accent))",

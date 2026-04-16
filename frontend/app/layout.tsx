@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Sidebar from "@/components/njm/Sidebar";
+import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
   title: "NJM OS — Agentic Operating System",
@@ -32,6 +33,7 @@ export default function RootLayout({
             {children}
           </main>
         </div>
+        <Toaster position="bottom-right" theme="dark" richColors />
       </body>
     </html>
   );

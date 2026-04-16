@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.main import router as pm_router
+from api.v1_router import router as v1_router
 
 app = FastAPI(
     title="NJM OS API",
@@ -18,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(pm_router)
+app.include_router(v1_router)
 
 
 @app.get("/health")

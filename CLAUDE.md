@@ -26,9 +26,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # first time
-source .venv/bin/activate
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+**Venv gotcha:** The `.venv` shebang encodes the absolute path at creation time. If the repo was moved or cloned to a different path, the venv is broken. Fix: `python3 -m venv .venv --clear && .venv/bin/pip install -r requirements.txt`.
+
+Use `.venv/bin/python3` (not `source .venv/bin/activate`) to avoid shell state issues. Always run from `backend/` so relative imports resolve correctly.
+
 Requires `backend/.env` with `ANTHROPIC_API_KEY=sk-ant-...`
 
 ### Frontend (Next.js)
@@ -37,8 +40,9 @@ cd frontend
 npm install              # first time
 npm run dev              # :3000
 npm run build            # production build (also type-checks)
-npx tsc --noEmit         # type-check only (must run from frontend/)
+./node_modules/.bin/tsc --noEmit   # type-check only (run from frontend/)
 ```
+Env: `frontend/.env.local` must have `NEXT_PUBLIC_API_URL=http://localhost:8000`
 
 ### API docs
 ```
@@ -50,83 +54,108 @@ http://localhost:8000/health    # health check
 
 ## Architecture
 
-NJM OS is a monorepo with two independent services. `ARCHITECTURE.md` is the full system design source of truth.
+NJM OS is a monorepo: FastAPI + LangGraph backend, Next.js 14 frontend.
 
-```
-real-njm-os/
-├── backend/        FastAPI + LangGraph agent engine
-├── frontend/       Next.js 14 App Router
-└── start.sh        runs both in parallel
-```
+- `ARCHITECTURE.md` — full product design source of truth (business logic, agent prompts, data schemas)
+- `ARCHITECTURE_ROADMAP_PHASE2.md` — Phase 2 technical roadmap: unified multi-agent graph design, RAG pipeline, checkpointer strategy, and full audit of current technical debt
 
-### Backend: Agent Engine
+### Backend modules
 
-Two AI agents orchestrated with **LangGraph**, both using `claude-3-5-sonnet-20241022` at `temperature=0`.
+| Module | Role |
+|---|---|
+| `main.py` | FastAPI app, CORS for `localhost:3000`, mounts both routers |
+| `api/main.py` | `POST /api/ejecutar-tarea` — PM agent endpoint (sync, `asyncio.to_thread`) |
+| `api/v1_router.py` | `POST /api/v1/ingest` (file upload placeholder) + `GET /api/v1/agent/stream` (SSE) |
+| `agent/graph.py` | Compiled `ceo_graph` — streaming-only CEO node (no tools), used by SSE endpoint |
+| `agentes/agente_ceo.py` | `nodo_ceo` — full CEO node with 5 tools and agentic loop (max 10 iters) — **not wired to any graph yet** |
+| `agentes/agente_pm.py` | `nodo_pm` — PM node with 14 skill tools, max 12 iters, max 2 autocorrection alerts |
+| `core/estado.py` | `NJM_PM_State` TypedDict — LangGraph state contract |
+| `core/schemas.py` | Pydantic v2: `LibroVivo` (9 vectors), `TarjetaSugerenciaUI`, `EstadoValidacion` enum |
+| `tools/pm_skills.py` | 14 `@tool`-decorated PM skills (business case, Ansoff, PRD, etc.) |
+
+**Critical architectural gap:** Two disconnected graphs exist. `agent/graph.py::ceo_graph` is a simplified streaming-only CEO (no tools). `api/main.py::_GRAFO_PM` is a synchronous PM graph. The CEO → PM handoff via `LibroVivo` is not implemented — `api/main.py` hardcodes `_LIBRO_VIVO_DISRUPT` as the test brand. The fully-implemented `nodo_ceo` in `agentes/agente_ceo.py` is currently orphaned. Phase 2 unifies both into one graph.
+
+**SSE endpoint (`GET /api/v1/agent/stream?sequenceId=...`):**
+- `ceo-audit` → real LangGraph streaming via `astream_events(version="v2")`, filters `on_chat_model_stream`
+- `pm-execution`, `ceo-approve`, `ceo-reject` → hardcoded mock scripts with `asyncio.sleep` delays
+- All sequences terminate with `data: [DONE]\n\n`
+- Anthropic streaming returns `chunk.content` as either `str` or `list[dict]` — `_extract_text()` normalizes both
+
+**`POST /api/v1/ingest` is a placeholder** — saves files to `backend/temp_uploads/` but does not extract text, embed, or connect to the CEO's `escanear_directorio_onboarding` tool (which reads from `~/NJM_OS/`).
+
+**Models:** `claude-3-5-haiku-20241022` (streaming in `agent/graph.py`), `claude-3-5-sonnet-20241022` (both agent nodes). All at `temperature=0`.
 
 **Data contract flow:**
 ```
-LibroVivo (9 strategic vectors, CEO-validated)
-  → NJM_PM_State (LangGraph TypedDict)
-  → POST /api/ejecutar-tarea
-  → TarjetaSugerenciaUI (JSON → Next.js)
+LibroVivo (9 vectors, CEO-validated JSON)
+  → NJM_PM_State (injected by api/main.py — currently hardcoded)
+  → nodo_pm (agentes/agente_pm.py, agentic loop)
+  → payload_tarjeta_sugerencia (TarjetaSugerenciaUI JSON → Next.js)
 ```
-
-**Modules:**
-- `backend/main.py` — FastAPI app, CORS for `localhost:3000`
-- `backend/api/main.py` — single router `POST /api/ejecutar-tarea`. Compiles `_GRAFO_PM` at module load, invokes via `asyncio.to_thread`.
-- `backend/core/estado.py` — `NJM_PM_State` TypedDict. `messages` reducer: `add_messages`; `documentos_generados` and `alertas_internas`: `operator.add` (append-only).
-- `backend/core/schemas.py` — Pydantic v2: `LibroVivo` (9 Vector sub-models), `TarjetaSugerenciaUI`, `EstadoValidacion` enum (`EN_PROGRESO` → `LISTO_PARA_FIRMA` | `BLOQUEO_CEO`).
-- `backend/agentes/agente_pm.py` — `nodo_pm`: builds system prompt dynamically from `libro_vivo` vectors, internal agentic loop (max 12 iterations, max 2 autocorrection alerts before `BLOQUEO_CEO`).
-- `backend/agentes/agente_ceo.py` — CEO agent: scans onboarding docs, maps to 8 business vectors, compiles Libro Vivo when all 9 vectors are 100%, acts as background ADN arbitrator.
-- `backend/tools/pm_skills.py` — 14 PM skill tools (e.g. `generar_business_case`, `generar_analisis_ansoff`, `generar_prd`). Active skills are set in `vector_9_perfil_pm.skills_especificas_activas`.
 
 **`TarjetaSugerenciaUI` states:**
 - `LISTO_PARA_FIRMA` → green card, file attachments, approve button
 - `BLOQUEO_CEO` → red banner, error log, escalation buttons
 
+**CEO tools** (in `agente_ceo.py`, currently orphaned): `escanear_directorio_onboarding`, `generar_reporte_brechas`, `iniciar_entrevista_profundidad`, `escribir_libro_vivo`, `levantar_tarjeta_roja`. Scans `~/NJM_OS/` for onboarding docs.
+
+**Active PM skills** are set per-brand in `vector_9_perfil_pm.skills_especificas_activas`. The hardcoded test brand (`_LIBRO_VIVO_DISRUPT` in `api/main.py`) activates: `generar_business_case`, `generar_analisis_ansoff`, `generar_prd`, `generar_plan_demanda`, `evaluar_preparacion_lanzamiento`.
+
 ### Frontend: Next.js 14 App Router
 
-Design system: **glassmorphism** ("Clear Crystal") — dark mode only, nature background at ~8% opacity, three agent color themes.
+Design system: **glassmorphism** ("Clear Crystal") — dark mode only (`<html class="dark">` hardcoded), nature background at ~8% opacity, three agent color themes.
 
-**Current route structure:**
+**Route structure:**
 ```
 frontend/app/
-├── layout.tsx                  # RootLayout: Sidebar + nature-bg layers
+├── layout.tsx                  # RootLayout: Sidebar (240px) + nature-bg layers + <Toaster>
 ├── page.tsx                    # Agency Hub (dashboard root)
 ├── settings/page.tsx           # Global settings
 └── brand/[id]/
     ├── layout.tsx              # Injects brandId via data-brand-id attr
-    ├── ceo/page.tsx            # CEO Workspace
-    ├── pm/page.tsx             # PM Workspace
+    ├── ceo/page.tsx            # CEO Workspace — vector grid + ingest dialog + agent console
+    ├── pm/page.tsx             # PM Workspace — artifacts grid + SlideOver + CEOShield
     └── libro-vivo/page.tsx     # Libro Vivo viewer (read-only)
 ```
 
-**Component hierarchy:**
-- `components/njm/` — business components. Currently: `Sidebar`, `BrandCard`, `VectorCard`, `SlideOver`
-- `components/ui/` — Shadcn UI primitives — **do not modify**. Internally uses `@base-ui/react` (not standard Radix); the exported component APIs are identical to standard Shadcn.
+**Key components:**
+- `components/njm/` — business components: `Sidebar`, `BrandCard`, `VectorCard`, `SlideOver`, `AgentConsole`, `CEOShield`
+- `components/ui/` — Shadcn UI primitives — **do not modify**. Uses `@base-ui/react` internally (not standard Radix); exported APIs are identical to standard Shadcn. `Dialog` controlled mode: `<Dialog open={bool} onOpenChange={setFn}>`.
+- `hooks/useAgentConsole` — call `invoke(sequenceId)` to open SSE to `${NEXT_PUBLIC_API_URL}/api/v1/agent/stream?sequenceId=...`; appends each `data:` line to `logs`; closes on `[DONE]` or error. Exposes `open`, `logs`, `running`, `close`.
+- `AgentConsole` — terminal drawer (slate-950, Fira Code). Log prefix colors: `[✓]` emerald, `[⏳]` amber, `[✗]/[!]` rose. Always pair with `useAgentConsole`.
+- `CEOShield` — brutalist Dialog modal (2px rose-600 border). Human-in-the-Loop gate for `BLOQUEO_CEO`. `onApprove` → `invoke("ceo-approve")`, `onReject` → `invoke("ceo-reject")`.
 
-**Tailwind color aliases** (use instead of raw HSL):
-- `text-agency` / `bg-agency` → blue `210 100% 52%`
-- `text-ceo` / `bg-ceo` → purple `271 81% 56%`
-- `text-pm` / `bg-pm` → emerald `160 84% 39%`
-- `surface-0` through `surface-3` → layered dark backgrounds
+**Mock data state:** Both `ceo/page.tsx` (`MOCK_VECTORES`) and `pm/page.tsx` (`MOCK_ARTEFACTOS`) render hardcoded data. Neither is connected to real backend state. The "Consultar PM" button invokes the mock `pm-execution` SSE script, not `POST /api/ejecutar-tarea`. The CEOShield is triggered manually via a dev button, not from real `BLOQUEO_CEO` events.
 
-**Key design constraints:**
-- Never use chat bubble interfaces — this is a dashboard/workspace.
-- Glass utilities: `.glass`, `.glass-subtle`, `.glass-strong` (defined in `globals.css`).
-- Agent accent colors are also available as CSS variables: `hsl(var(--agency-accent))`, `hsl(var(--ceo-accent))`, `hsl(var(--pm-accent))`. Always use HSL format, not oklch.
+**Toast:** `import { toast } from "sonner"` — `<Toaster>` mounted in root layout.
+
+**Tailwind tokens — use these, not raw HSL:**
+
+| Class | Value |
+|---|---|
+| `text-agency` / `bg-agency` | blue `210 100% 52%` |
+| `text-ceo` / `bg-ceo` | purple `271 81% 56%` |
+| `text-pm` / `bg-pm` | emerald `160 84% 39%` |
+| `surface-{0-3}` | layered dark backgrounds |
+
+When Tailwind JIT can't resolve dynamic HSL strings, use CSS variables: `hsl(var(--ceo-accent))`. Always HSL — never oklch.
+
+**Glass utilities** (in `globals.css`): `.glass`, `.glass-subtle`, `.glass-strong`
+
+**Fonts:** Body `Inter`, mono `Fira Code` (`font-mono` class).
+
+**Design constraints:**
+- Never use chat bubble interfaces — this is a workspace dashboard.
 - `nature-bg.jpg` lives in `frontend/public/`.
-- Auth (not yet built): mock `localStorage.getItem("njm-auth") === "true"`.
-- PM Workspace is gated: only accessible after CEO validates all vectors and signs the Libro Vivo.
+- Auth mock: `localStorage.getItem("njm-auth") === "true"` (not yet built).
+- PM Workspace gated: only accessible after CEO validates all vectors + signs Libro Vivo.
 
-**State flow (planned):**
-```
-AgencyContext.isSetupComplete
-  false → DayCeroView (4-step onboarding wizard)
-  true  → AgencyHubView → brand/[id]/ceo
-            ├── CEO: validateAllVectors() → signLibroVivo() → unlocks PM
-            └── PM: gated by isLibroVivoComplete(brandId)
-```
-
-`context/` (not yet built) will hold `AgencyContext` and `BrandContext`.  
-`data/` (not yet built) will hold mock data: `brands.ts`, `ceoManagement.ts`, `pmManagement.ts`.
+**Not yet built (see ARCHITECTURE_ROADMAP_PHASE2.md for implementation plan):**
+- Unified multi-agent LangGraph (`njm_graph`) with `NJM_OS_State`, checkpointer, and real CEO → PM handoff
+- Real ingest pipeline (text extraction + ChromaDB embedding)
+- Typed SSE events (currently plain text — Phase 2 adds JSON events)
+- `POST /api/v1/agent/resume` endpoint for Human-in-the-Loop graph resumption
+- `GET /api/v1/session/state` endpoint to hydrate frontend from checkpointer
+- `context/` — `AgencyContext` and `BrandContext`
+- `data/` — `brands.ts`, `ceoManagement.ts`, `pmManagement.ts`
+- DayCeroView onboarding wizard (4-step)
