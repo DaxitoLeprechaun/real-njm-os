@@ -16,6 +16,24 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 
+class NJM_OS_State(TypedDict):
+    """
+    Estado unificado del grafo multi-agente (CEO + PM).
+    Soporta checkpointing y continuidad de conversación via thread_id.
+    """
+    messages: Annotated[list, add_messages]
+    modo: str                               # "auditoria" | "ejecucion" | "onboarding"
+    nombre_marca: str
+    libro_vivo: Dict[str, Any]
+    ruta_espacio_trabajo: str
+    peticion_humano: str
+    skill_activa: Optional[str]
+    estado_validacion: str                  # EN_PROGRESO | BLOQUEO_CEO | LISTO_PARA_FIRMA
+    documentos_generados: Annotated[List[str], operator.add]
+    alertas_internas: Annotated[List[str], operator.add]
+    payload_tarjeta_sugerencia: Optional[Dict[str, Any]]
+
+
 class NJM_PM_State(TypedDict):
     """
     Estado global del Agente PM durante la ejecución de una tarea en NJM OS.

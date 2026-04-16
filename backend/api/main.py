@@ -21,38 +21,12 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from langchain_core.messages import HumanMessage
-from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
-from agentes.agente_pm import nodo_pm
-from core.estado import NJM_PM_State
+from agent.graph import unified_graph
 from core.schemas import EstadoValidacion
 
 router = APIRouter()
-
-# ══════════════════════════════════════════════════════════════════
-# GRAFO LANGGRAPH — compilado una sola vez al iniciar el módulo
-# ══════════════════════════════════════════════════════════════════
-
-
-def _compilar_grafo_pm():
-    """
-    Construye y compila el grafo mínimo del Agente PM.
-
-    Topología: START → nodo_pm → END
-
-    nodo_pm ya implementa su propio loop agéntico interno (LLM + tool calls),
-    por lo que el grafo externo es intencionalmente lineal. La complejidad
-    de enrutamiento entre CEO y PM se añadirá en fases posteriores.
-    """
-    grafo = StateGraph(NJM_PM_State)
-    grafo.add_node("nodo_pm", nodo_pm)
-    grafo.add_edge(START, "nodo_pm")
-    grafo.add_edge("nodo_pm", END)
-    return grafo.compile()
-
-
-_GRAFO_PM = _compilar_grafo_pm()
 
 # ══════════════════════════════════════════════════════════════════
 # LIBRO VIVO DE PRUEBA — Marca "Disrupt" (B2B SaaS / Technical_PM)
@@ -169,8 +143,10 @@ _LIBRO_VIVO_DISRUPT: Dict[str, Any] = {
 
 class EjecutarTareaRequest(BaseModel):
     peticion: str
+    modo: str = "auditoria"
     nombre_marca: str = "Disrupt"
     ruta_espacio_trabajo: str = "/NJM_OS/Marcas/Disrupt/Q2_Campaign/"
+    thread_id: Optional[str] = None
 
 
 class ErrorResponse(BaseModel):
@@ -241,14 +217,6 @@ def _payload_sin_documentos(peticion: str) -> Dict[str, Any]:
     },
 )
 async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
-    """
-    Endpoint principal de ejecución del Agente PM.
-
-    1. Valida que ANTHROPIC_API_KEY esté configurada.
-    2. Inicializa el NJM_PM_State con el Libro Vivo de prueba (Disrupt).
-    3. Invoca el grafo compilado en un thread separado (no bloquea el event loop).
-    4. Extrae y devuelve el payload_tarjeta_sugerencia del estado final.
-    """
     # ── Guardia: API Key ──────────────────────────────────────────
     if not os.getenv("ANTHROPIC_API_KEY"):
         raise HTTPException(
@@ -263,9 +231,15 @@ async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
             },
         )
 
+    # ── Thread ID para memoria persistente ───────────────────────
+    thread_id = req.thread_id or str(uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+
     # ── Inicializar estado ────────────────────────────────────────
-    estado_inicial: NJM_PM_State = {
+    estado_inicial = {
         "messages": [HumanMessage(content=req.peticion)],
+        "modo": req.modo,
+        "nombre_marca": req.nombre_marca,
         "libro_vivo": _LIBRO_VIVO_DISRUPT,
         "ruta_espacio_trabajo": req.ruta_espacio_trabajo,
         "peticion_humano": req.peticion,
@@ -276,10 +250,10 @@ async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
         "payload_tarjeta_sugerencia": None,
     }
 
-    # ── Ejecutar grafo (en thread para no bloquear el event loop) ─
+    # ── Ejecutar grafo con checkpointer ──────────────────────────
     try:
         estado_final: Dict[str, Any] = await asyncio.to_thread(
-            _GRAFO_PM.invoke, estado_inicial
+            unified_graph.invoke, estado_inicial, config
         )
     except Exception as exc:
         raise HTTPException(
@@ -291,10 +265,11 @@ async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
             },
         ) from exc
 
-    # ── Extraer payload ───────────────────────────────────────────
+    # ── Extraer payload y añadir thread_id ───────────────────────
     payload = estado_final.get("payload_tarjeta_sugerencia")
 
     if payload is None:
         payload = _payload_sin_documentos(req.peticion)
 
+    payload["thread_id"] = thread_id
     return payload

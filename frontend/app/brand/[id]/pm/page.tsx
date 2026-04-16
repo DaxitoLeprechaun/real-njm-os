@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import SlideOver from "@/components/njm/SlideOver";
 import AgentConsole from "@/components/njm/AgentConsole";
 import CEOShield from "@/components/njm/CEOShield";
 import { useAgentConsole } from "@/hooks/useAgentConsole";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 interface Artefacto {
   id: string;
@@ -203,11 +206,43 @@ export default function PMWorkspacePage({
 }) {
   const [activeArtefacto, setActiveArtefacto] = useState<Artefacto | null>(null);
   const [shieldOpen, setShieldOpen] = useState(false);
+  const [shieldMessage, setShieldMessage] = useState("");
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [executing, setExecuting] = useState(false);
 
   const agentConsole = useAgentConsole();
 
-  function handleConsultarPM() {
+  async function handleConsultarPM() {
+    setExecuting(true);
     agentConsole.invoke("pm-execution");
+    try {
+      const res = await fetch(`${API_URL}/api/ejecutar-tarea`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          peticion: "Ejecuta la táctica de marketing más adecuada para la marca.",
+          modo: "ejecucion",
+          nombre_marca: "Disrupt",
+          thread_id: threadId ?? undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.thread_id) setThreadId(data.thread_id);
+      if (data.estado_ejecucion === "BLOQUEO_CEO") {
+        const msg =
+          data.contenido_tarjeta?.check_coherencia_adn?.justificacion ||
+          data.contenido_tarjeta?.log_errores_escalamiento?.[0] ||
+          "El CEO bloqueó la ejecución por riesgo estratégico.";
+        setShieldMessage(msg);
+        setShieldOpen(true);
+      } else if (!res.ok) {
+        toast.error("Error al consultar el PM");
+      }
+    } catch {
+      toast.error("No se pudo conectar con el backend");
+    } finally {
+      setExecuting(false);
+    }
   }
 
   return (
@@ -331,7 +366,7 @@ export default function PMWorkspacePage({
       <CEOShield
         open={shieldOpen}
         onOpenChange={setShieldOpen}
-        riskMessage="El presupuesto propuesto excede el límite del Vector 5. La táctica de expansión LATAM requiere aprobación antes de continuar la ejecución."
+        riskMessage={shieldMessage || "El CEO bloqueó la ejecución por riesgo estratégico."}
         onApprove={() => {
           agentConsole.invoke("ceo-approve");
         }}
@@ -344,7 +379,8 @@ export default function PMWorkspacePage({
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
         <button
           onClick={handleConsultarPM}
-          className="pointer-events-auto flex items-center gap-2.5 px-7 py-3.5 rounded-full font-semibold text-sm text-white transition-all duration-200 hover:brightness-110 active:scale-[0.97]"
+          disabled={executing}
+          className="pointer-events-auto flex items-center gap-2.5 px-7 py-3.5 rounded-full font-semibold text-sm text-white transition-all duration-200 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 disabled:cursor-not-allowed"
           style={{
             background: "hsl(var(--pm-accent))",
             boxShadow:

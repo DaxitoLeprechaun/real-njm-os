@@ -1,28 +1,100 @@
 """
-NJM OS — CEO Auditor Graph (LangGraph)
+NJM OS — Unified Multi-Agent Graph (CEO + PM)
 
-Minimal StateGraph wired for real-time SSE streaming via astream_events.
+Topology:
+  START → router_node → ceo_node  → [END | pm_node]
+                      → pm_node   → END
 
-State:
-  messages      — conversation history (add_messages reducer)
-  brand_context — raw brand info string injected per request
-  risk_flag     — set True when CEO detects a blocking risk
+Routing:
+  - modo "auditoria" | "onboarding" | libro_vivo empty → CEO
+  - modo "ejecucion" + libro_vivo populated             → PM
 
-Graph:  START → ceo_auditor_node → END
+Post-CEO conditional edge:
+  - BLOQUEO_CEO  → END  (PM never runs)
+  - LISTO_PARA_FIRMA → pm_node
+  - else         → END
+
+Checkpointer: SqliteSaver — thread_id enables multi-turn memory.
+
+SSE streaming graph (ceo_graph) kept as a separate export for v1_router.
 """
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Annotated, Any
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
+from agentes.agente_ceo import nodo_ceo
+from agentes.agente_pm import nodo_pm
+from core.estado import NJM_OS_State
+from core.schemas import EstadoValidacion
+
 # ══════════════════════════════════════════════════════════════════
-# STATE
+# ROUTING LOGIC
+# ══════════════════════════════════════════════════════════════════
+
+def router_node(state: NJM_OS_State) -> dict[str, Any]:
+    """Pass-through node — routing is done via conditional edges."""
+    return {}
+
+
+def _initial_route(state: NJM_OS_State) -> str:
+    modo = state.get("modo", "auditoria")
+    libro_vivo = state.get("libro_vivo") or {}
+    if modo == "ejecucion" and libro_vivo:
+        return "pm_node"
+    return "ceo_node"
+
+
+def _post_ceo_route(state: NJM_OS_State) -> str:
+    estado = state.get("estado_validacion", EstadoValidacion.EN_PROGRESO.value)
+    libro_vivo = state.get("libro_vivo") or {}
+    if estado == EstadoValidacion.BLOQUEO_CEO.value:
+        return END
+    if estado == EstadoValidacion.LISTO_PARA_FIRMA.value and libro_vivo:
+        return "pm_node"
+    return END
+
+
+# ══════════════════════════════════════════════════════════════════
+# UNIFIED GRAPH
+# ══════════════════════════════════════════════════════════════════
+
+def _build_unified_graph() -> Any:
+    builder = StateGraph(NJM_OS_State)
+
+    builder.add_node("router_node", router_node)
+    builder.add_node("ceo_node", nodo_ceo)
+    builder.add_node("pm_node", nodo_pm)
+
+    builder.add_edge(START, "router_node")
+    builder.add_conditional_edges("router_node", _initial_route, {
+        "ceo_node": "ceo_node",
+        "pm_node": "pm_node",
+    })
+    builder.add_conditional_edges("ceo_node", _post_ceo_route, {
+        "pm_node": "pm_node",
+        END: END,
+    })
+    builder.add_edge("pm_node", END)
+
+    conn = sqlite3.connect("njm_checkpoints.db", check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
+    return builder.compile(checkpointer=checkpointer)
+
+
+unified_graph = _build_unified_graph()
+
+
+# ══════════════════════════════════════════════════════════════════
+# SSE STREAMING GRAPH — kept for /api/v1/agent/stream (v1_router)
 # ══════════════════════════════════════════════════════════════════
 
 class AgentState(TypedDict):
@@ -30,10 +102,6 @@ class AgentState(TypedDict):
     brand_context: str
     risk_flag: bool
 
-
-# ══════════════════════════════════════════════════════════════════
-# MODEL
-# ══════════════════════════════════════════════════════════════════
 
 _SYSTEM_PROMPT = (
     "Eres el CEO de NJM OS evaluando una marca. "
@@ -43,7 +111,6 @@ _SYSTEM_PROMPT = (
     "Si detectas riesgos financieros, operativos o de reputación, señálalos explícitamente."
 )
 
-# claude-3-5-haiku: fast, cheap, streaming-capable — ideal for SSE
 _LLM = ChatAnthropic(
     model="claude-3-5-haiku-20241022",
     temperature=0,
@@ -51,15 +118,7 @@ _LLM = ChatAnthropic(
 )
 
 
-# ══════════════════════════════════════════════════════════════════
-# NODE
-# ══════════════════════════════════════════════════════════════════
-
 def ceo_auditor_node(state: AgentState) -> dict[str, Any]:
-    """
-    Injects the CEO system prompt + brand_context, then invokes the LLM.
-    Returns only the new AI message so add_messages can append it cleanly.
-    """
     context_note = (
         f"\n\n[CONTEXTO DE MARCA INYECTADO]\n{state['brand_context']}"
         if state.get("brand_context")
@@ -71,14 +130,9 @@ def ceo_auditor_node(state: AgentState) -> dict[str, Any]:
     return {"messages": [response]}
 
 
-# ══════════════════════════════════════════════════════════════════
-# GRAPH
-# ══════════════════════════════════════════════════════════════════
+_sse_builder: StateGraph = StateGraph(AgentState)
+_sse_builder.add_node("ceo_auditor", ceo_auditor_node)
+_sse_builder.add_edge(START, "ceo_auditor")
+_sse_builder.add_edge("ceo_auditor", END)
 
-_builder: StateGraph = StateGraph(AgentState)
-_builder.add_node("ceo_auditor", ceo_auditor_node)
-_builder.add_edge(START, "ceo_auditor")
-_builder.add_edge("ceo_auditor", END)
-
-# Compiled once at import time — reused across all requests.
-ceo_graph = _builder.compile()
+ceo_graph = _sse_builder.compile()
