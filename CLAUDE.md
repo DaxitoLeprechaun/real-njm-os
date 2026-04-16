@@ -63,17 +63,17 @@ NJM OS is a monorepo: FastAPI + LangGraph backend, Next.js 14 frontend.
 
 | Module | Role |
 |---|---|
-| `main.py` | FastAPI app, CORS for `localhost:3000`, mounts both routers |
-| `api/main.py` | `POST /api/ejecutar-tarea` — PM agent endpoint (sync, `asyncio.to_thread`) |
+| `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers |
+| `api/main.py` | `POST /api/ejecutar-tarea` — invokes `unified_graph` (async via `asyncio.to_thread`); hardcodes `_LIBRO_VIVO_DISRUPT` as the test brand |
 | `api/v1_router.py` | `POST /api/v1/ingest` (file upload placeholder) + `GET /api/v1/agent/stream` (SSE) |
-| `agent/graph.py` | Compiled `ceo_graph` — streaming-only CEO node (no tools), used by SSE endpoint |
-| `agentes/agente_ceo.py` | `nodo_ceo` — full CEO node with 5 tools and agentic loop (max 10 iters) — **not wired to any graph yet** |
-| `agentes/agente_pm.py` | `nodo_pm` — PM node with 14 skill tools, max 12 iters, max 2 autocorrection alerts |
-| `core/estado.py` | `NJM_PM_State` TypedDict — LangGraph state contract |
+| `agent/graph.py` | Two compiled graphs: `unified_graph` (CEO+PM, SqliteSaver checkpointer) and `ceo_graph` (streaming-only CEO for SSE). `load_dotenv()` in `main.py` **must run before this module is imported** — it instantiates `ChatAnthropic` at module level (`_LLM`). |
+| `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 5 tools, agentic loop (max 10 iters); wired into `unified_graph` |
+| `agentes/agente_pm.py` | `nodo_pm` — PM node with 14 skill tools, max 12 iters, max 2 autocorrection alerts; wired into `unified_graph` |
+| `core/estado.py` | `NJM_OS_State` TypedDict — LangGraph state contract |
 | `core/schemas.py` | Pydantic v2: `LibroVivo` (9 vectors), `TarjetaSugerenciaUI`, `EstadoValidacion` enum |
 | `tools/pm_skills.py` | 14 `@tool`-decorated PM skills (business case, Ansoff, PRD, etc.) |
 
-**Critical architectural gap:** Two disconnected graphs exist. `agent/graph.py::ceo_graph` is a simplified streaming-only CEO (no tools). `api/main.py::_GRAFO_PM` is a synchronous PM graph. The CEO → PM handoff via `LibroVivo` is not implemented — `api/main.py` hardcodes `_LIBRO_VIVO_DISRUPT` as the test brand. The fully-implemented `nodo_ceo` in `agentes/agente_ceo.py` is currently orphaned. Phase 2 unifies both into one graph.
+**Graph topology** (`unified_graph`): `START → router_node → ceo_node → [END | pm_node] → END`. Routing: `modo="auditoria"` or empty `libro_vivo` → CEO first; `modo="ejecucion"` + populated `libro_vivo` → PM directly. Post-CEO edge: `BLOQUEO_CEO` → END, `LISTO_PARA_FIRMA` + libro_vivo → PM. Checkpointer: `SqliteSaver` on `njm_checkpoints.db`; pass `{"configurable": {"thread_id": "..."}}` to `invoke`/`astream_events` for multi-turn memory.
 
 **SSE endpoint (`GET /api/v1/agent/stream?sequenceId=...`):**
 - `ceo-audit` → real LangGraph streaming via `astream_events(version="v2")`, filters `on_chat_model_stream`
