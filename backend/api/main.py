@@ -15,15 +15,18 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
+from agentes.agente_ceo import nodo_ceo
 from agentes.agente_pm import nodo_pm
 from core.estado import NJM_PM_State
 from core.schemas import EstadoValidacion
@@ -31,28 +34,57 @@ from core.schemas import EstadoValidacion
 router = APIRouter()
 
 # ══════════════════════════════════════════════════════════════════
+# CHECKPOINTER — SqliteSaver para persistencia entre sesiones
+# ══════════════════════════════════════════════════════════════════
+
+_DB_PATH = os.environ.get("NJM_CHECKPOINT_DB", "/tmp/njm_checkpoints.sqlite")
+_CHECKPOINTER = SqliteSaver(sqlite3.connect(_DB_PATH, check_same_thread=False))
+
+# ══════════════════════════════════════════════════════════════════
+# ROUTER — Decide qué nodo ejecutar según modo_operacion
+# ══════════════════════════════════════════════════════════════════
+
+
+def _router(state: NJM_PM_State) -> str:
+    modo = state.get("modo_operacion", "ejecucion")
+    if modo in ("onboarding", "auditoria"):
+        return "nodo_ceo"
+    return "nodo_pm"
+
+
+def _ceo_post_router(state: NJM_PM_State) -> str:
+    """Tras CEO en modo auditoria: continúa al PM si no hay bloqueo."""
+    if (
+        state.get("modo_operacion") == "auditoria"
+        and state.get("estado_validacion") != EstadoValidacion.BLOQUEO_CEO.value
+    ):
+        return "nodo_pm"
+    return END
+
+
+# ══════════════════════════════════════════════════════════════════
 # GRAFO LANGGRAPH — compilado una sola vez al iniciar el módulo
 # ══════════════════════════════════════════════════════════════════
 
 
-def _compilar_grafo_pm():
+def _compilar_grafo():
     """
-    Construye y compila el grafo mínimo del Agente PM.
+    Topología unificada CEO + PM:
 
-    Topología: START → nodo_pm → END
-
-    nodo_pm ya implementa su propio loop agéntico interno (LLM + tool calls),
-    por lo que el grafo externo es intencionalmente lineal. La complejidad
-    de enrutamiento entre CEO y PM se añadirá en fases posteriores.
+      START → router → nodo_ceo → (auditoria sin bloqueo) → nodo_pm → END
+                     ↘ nodo_pm → END          (modo ejecucion)
+                       nodo_ceo → END          (onboarding / bloqueo)
     """
     grafo = StateGraph(NJM_PM_State)
+    grafo.add_node("nodo_ceo", nodo_ceo)
     grafo.add_node("nodo_pm", nodo_pm)
-    grafo.add_edge(START, "nodo_pm")
+    grafo.add_conditional_edges(START, _router, {"nodo_ceo": "nodo_ceo", "nodo_pm": "nodo_pm"})
+    grafo.add_conditional_edges("nodo_ceo", _ceo_post_router, {"nodo_pm": "nodo_pm", END: END})
     grafo.add_edge("nodo_pm", END)
-    return grafo.compile()
+    return grafo.compile(checkpointer=_CHECKPOINTER)
 
 
-_GRAFO_PM = _compilar_grafo_pm()
+_GRAFO = _compilar_grafo()
 
 # ══════════════════════════════════════════════════════════════════
 # LIBRO VIVO DE PRUEBA — Marca "Disrupt" (B2B SaaS / Technical_PM)
@@ -171,6 +203,8 @@ class EjecutarTareaRequest(BaseModel):
     peticion: str
     nombre_marca: str = "Disrupt"
     ruta_espacio_trabajo: str = "/NJM_OS/Marcas/Disrupt/Q2_Campaign/"
+    modo: str = "ejecucion"  # "onboarding" | "ejecucion" | "auditoria"
+    thread_id: Optional[str] = None  # Si None, se genera uno nuevo
 
 
 class ErrorResponse(BaseModel):
@@ -264,7 +298,10 @@ async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
         )
 
     # ── Inicializar estado ────────────────────────────────────────
+    tid = req.thread_id or str(uuid4())
     estado_inicial: NJM_PM_State = {
+        "thread_id": tid,
+        "modo_operacion": req.modo,
         "messages": [HumanMessage(content=req.peticion)],
         "libro_vivo": _LIBRO_VIVO_DISRUPT,
         "ruta_espacio_trabajo": req.ruta_espacio_trabajo,
@@ -275,11 +312,12 @@ async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
         "alertas_internas": [],
         "payload_tarjeta_sugerencia": None,
     }
+    config = {"configurable": {"thread_id": tid}}
 
     # ── Ejecutar grafo (en thread para no bloquear el event loop) ─
     try:
         estado_final: Dict[str, Any] = await asyncio.to_thread(
-            _GRAFO_PM.invoke, estado_inicial
+            _GRAFO.invoke, estado_inicial, config
         )
     except Exception as exc:
         raise HTTPException(
@@ -297,4 +335,22 @@ async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
     if payload is None:
         payload = _payload_sin_documentos(req.peticion)
 
+    payload["thread_id"] = tid
     return payload
+
+
+@router.post("/api/upload-documento", summary="Indexar PDF en ChromaDB")
+async def upload_documento(file: UploadFile = File(...)) -> Dict[str, Any]:
+    from core.document_processor import pdf_to_docs
+    from core.vector_store import vector_store
+
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF.")
+
+    contents = await file.read()
+    docs = pdf_to_docs(contents, file.filename)
+    if not docs:
+        raise HTTPException(status_code=422, detail="El PDF no contiene texto extraíble.")
+
+    vector_store.add_documents(docs)
+    return {"status": "ok", "chunks_indexados": len(docs), "filename": file.filename}

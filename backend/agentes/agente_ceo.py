@@ -556,12 +556,28 @@ def levantar_tarjeta_roja(
 # REGISTRO DE HERRAMIENTAS
 # ══════════════════════════════════════════════════════════════════
 
+@tool
+def buscar_en_documentos(query: str, k: int = 5) -> str:
+    """Búsqueda semántica en documentos PDF subidos por el usuario vía /api/upload-documento."""
+    try:
+        from core.vector_store import vector_store
+        results = vector_store.similarity_search(query, k=k)
+    except Exception as exc:
+        return f"ERROR al consultar ChromaDB: {exc}"
+    if not results:
+        return "No se encontraron documentos relevantes para la consulta."
+    return "\n\n".join(
+        f"[{r.metadata.get('source', 'desconocido')}]\n{r.page_content}" for r in results
+    )
+
+
 CEO_TOOLS = [
     escanear_directorio_onboarding,
     generar_reporte_brechas,
     iniciar_entrevista_profundidad,
     escribir_libro_vivo,
     levantar_tarjeta_roja,
+    buscar_en_documentos,
 ]
 
 _TOOL_MAP: Dict[str, Any] = {t.name: t for t in CEO_TOOLS}

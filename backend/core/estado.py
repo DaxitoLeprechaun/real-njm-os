@@ -18,13 +18,19 @@ from typing_extensions import TypedDict
 
 class NJM_PM_State(TypedDict):
     """
-    Estado global del Agente PM durante la ejecución de una tarea en NJM OS.
+    Estado global del grafo NJM OS (CEO + PM).
     Instanciado por LangGraph al inicio de cada petición del Encargado Real.
     """
 
     # ─────────────────────────────────────────────────────────────
     # 1. MEMORIA CORE Y RUTEO
     # ─────────────────────────────────────────────────────────────
+    thread_id: str
+    # Identificador de sesión para SqliteSaver — permite retomar conversaciones.
+
+    modo_operacion: str
+    # Modo de ejecución del grafo: "onboarding" | "ejecucion" | "auditoria"
+
     messages: Annotated[list, add_messages]
     # Historial de conversación y llamadas a herramientas (ToolCalls/ToolMessages).
     # add_messages concatena entradas nuevas sin sobrescribir el historial previo.

@@ -7,6 +7,7 @@ uvicorn[standard]==0.32.1
 
 # LangChain / LangGraph
 langgraph==0.2.60
+langgraph-checkpoint-sqlite
 langchain==0.3.13
 langchain-anthropic==0.3.3
 langchain-core>=0.3.30,<0.4.0
@@ -18,3 +19,10 @@ pydantic-settings==2.7.0
 # Async / utilities
 python-dotenv==1.0.1
 httpx==0.28.1
+
+# PDF + RAG
+pypdf==4.0.0
+chromadb==0.5.23
+langchain-chroma==0.1.4
+langchain-community>=0.3.0
+python-multipart==0.0.9
