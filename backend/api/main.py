@@ -13,6 +13,12 @@ Flujo:
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 import asyncio
 import os
 import sqlite3
@@ -296,6 +302,8 @@ async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
                 "id_transaccion": str(uuid4()),
             },
         )
+
+    print(f"DEBUG: ANTHROPIC_API_KEY detectada: {bool(os.getenv('ANTHROPIC_API_KEY'))}")
 
     # ── Inicializar estado ────────────────────────────────────────
     tid = req.thread_id or str(uuid4())

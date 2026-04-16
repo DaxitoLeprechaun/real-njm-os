@@ -1,0 +1,21 @@
+# Secrets
+.env
+*.env
+backend/.env
+
+# Python venv
+backend/.venv/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
