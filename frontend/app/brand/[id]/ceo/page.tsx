@@ -88,6 +88,7 @@ export default function CEOWorkspacePage({
     if (!selectedFile && !manualInput.trim()) return;
 
     const formData = new FormData();
+    formData.append("brand_id", params.id);
     if (selectedFile) formData.append("file", selectedFile);
     if (manualInput.trim()) formData.append("context", manualInput.trim());
     if (activeVectorId) formData.append("vectorId", activeVectorId);

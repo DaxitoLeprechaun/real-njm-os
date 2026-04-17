@@ -279,61 +279,6 @@ async def _sse_njm_stream(
     yield _sse_json({"type": "done"})
 
 
-async def _sse_ceo_audit(brand_context: str) -> AsyncGenerator[str, None]:
-    """Stream real CEO auditor tokens from LangGraph via astream_events."""
-    # Import here to avoid circular imports and keep graph load lazy.
-    from agent.njm_graph import AgentState, ceo_graph  # noqa: PLC0415
-
-    initial_state: AgentState = {
-        "messages": [
-            HumanMessage(
-                content=(
-                    "Inicia la auditoría CEO. Analiza el contexto de marca provisto, "
-                    "evalúa riesgos estratégicos y emite tu diagnóstico ejecutivo."
-                )
-            )
-        ],
-        "brand_context": brand_context,
-        "risk_flag": False,
-    }
-
-    yield "data: [⏳] Conectando con Agente CEO real (Claude)...\n\n"
-    await asyncio.sleep(0.1)
-
-    buffer: str = ""
-
-    async for event in ceo_graph.astream_events(initial_state, version="v2"):
-        if event["event"] != "on_chat_model_stream":
-            continue
-
-        chunk = event["data"].get("chunk")
-        if chunk is None:
-            continue
-
-        text = _extract_text(chunk.content)
-        if not text:
-            continue
-
-        # Buffer tokens until we have a natural flush point (newline or ~80 chars).
-        buffer += text
-        while "\n" in buffer or len(buffer) >= 80:
-            if "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                if line.strip():
-                    yield f"data: {line.strip()}\n\n"
-            else:
-                yield f"data: {buffer}\n\n"
-                buffer = ""
-                break
-
-    # Flush remaining buffer
-    if buffer.strip():
-        yield f"data: {buffer.strip()}\n\n"
-
-    yield "data: [✓] Auditoría CEO completada.\n\n"
-    yield "data: [DONE]\n\n"
-
-
 async def _sse_mock(sequence_id: str) -> AsyncGenerator[str, None]:
     script = _MOCK_SCRIPTS.get(sequence_id, _DEFAULT_SCRIPT)
 
