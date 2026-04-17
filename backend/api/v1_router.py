@@ -18,11 +18,35 @@ from typing import AsyncGenerator
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+import json
+
 from langchain_core.messages import HumanMessage
 
 router = APIRouter(prefix="/api/v1")
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "temp_uploads"
+
+_NODE_START_LOG: dict[str, str] = {
+    "ingest": "[⏳] Procesando documentos de onboarding...",
+    "ceo_auditor": "[⏳] Auditoría CEO iniciada — escaneando vectores estratégicos...",
+    "human_in_loop": "[⏳] Esperando input del Encargado Real...",
+    "pm_execution": "[⏳] Agente PM ejecutando skill seleccionada...",
+    "ceo_review": "[⏳] CEO revisando output del PM...",
+    "output": "[⏳] Generando tarjeta final...",
+}
+
+_NODE_END_LOG: dict[str, str] = {
+    "ingest": "[✓] Documentos indexados en memoria de marca.",
+    "ceo_auditor": "[✓] Auditoría CEO completada.",
+    "pm_execution": "[✓] Ejecución PM finalizada.",
+    "ceo_review": "[✓] Revisión CEO completada.",
+    "output": "[✓] Tarjeta lista.",
+}
+
+
+def _sse_json(payload: dict) -> str:
+    """Format a dict as an SSE data line."""
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -118,6 +142,140 @@ def _extract_text(content: str | list) -> str:
     return "".join(parts)
 
 
+async def _sse_njm_stream(
+    brand_id: str,
+    session_id: str,
+) -> AsyncGenerator[str, None]:
+    """
+    Stream njm_graph.astream_events for a given brand/session.
+
+    Emits JSON-structured SSE events:
+      {"type": "log",            "text": "..."}
+      {"type": "action_required", "trigger": "BLOQUEO_CEO"|"GAP_DETECTED", ...}
+      {"type": "done"}
+    """
+    from agent.njm_graph import njm_graph  # noqa: PLC0415
+    from core.dev_fixtures import _LIBRO_VIVO_DISRUPT  # noqa: PLC0415
+
+    thread_id = f"{brand_id}:{session_id}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    if brand_id == "disrupt":
+        initial_state = {
+            "brand_id": brand_id,
+            "session_id": session_id,
+            "messages": [
+                HumanMessage(
+                    content="Ejecuta el flujo completo. brand_id=disrupt, usar fixtures de desarrollo."
+                )
+            ],
+            "audit_status": "COMPLETE",
+            "libro_vivo": _LIBRO_VIVO_DISRUPT,
+            "brand_context_raw": _DEFAULT_BRAND_CONTEXT,
+            "uploaded_doc_paths": [],
+            "documentos_generados": [],
+            "alertas_internas": [],
+            "ruta_espacio_trabajo": f"~/NJM_OS/Marcas/{brand_id}/workspace/",
+            "risk_flag": False,
+            "estado_validacion": "EN_PROGRESO",
+            "peticion_humano": "Genera el Business Case inicial para la marca.",
+        }
+    else:
+        initial_state = {
+            "brand_id": brand_id,
+            "session_id": session_id,
+            "messages": [
+                HumanMessage(
+                    content="Inicia la auditoría CEO y ejecuta el flujo completo."
+                )
+            ],
+            "audit_status": "PENDING",
+            "brand_context_raw": "",
+            "uploaded_doc_paths": [],
+            "documentos_generados": [],
+            "alertas_internas": [],
+            "ruta_espacio_trabajo": f"~/NJM_OS/Marcas/{brand_id}/workspace/",
+            "risk_flag": False,
+            "estado_validacion": "EN_PROGRESO",
+        }
+
+    yield _sse_json({"type": "log", "text": f"[⏳] Conectando con NJM OS (brand: {brand_id})..."})
+    await asyncio.sleep(0.05)
+
+    buffer: str = ""
+
+    try:
+        async for event in njm_graph.astream_events(initial_state, config, version="v2"):
+            etype = event.get("event", "")
+            name = event.get("name", "")
+
+            if etype == "on_chain_start" and name in _NODE_START_LOG:
+                yield _sse_json({"type": "log", "text": _NODE_START_LOG[name]})
+
+            elif etype == "on_chain_end" and name in _NODE_END_LOG:
+                yield _sse_json({"type": "log", "text": _NODE_END_LOG[name]})
+
+            elif etype == "on_tool_start":
+                yield _sse_json({"type": "log", "text": f"[⏳] Herramienta: {name}..."})
+
+            elif etype == "on_tool_end":
+                yield _sse_json({"type": "log", "text": f"[✓] {name} completada."})
+
+            elif etype == "on_chat_model_stream":
+                chunk = event["data"].get("chunk")
+                if chunk is None:
+                    continue
+                text = _extract_text(chunk.content)
+                if not text:
+                    continue
+                buffer += text
+                while "\n" in buffer or len(buffer) >= 80:
+                    if "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        if line.strip():
+                            yield _sse_json({"type": "log", "text": line.strip()})
+                    else:
+                        yield _sse_json({"type": "log", "text": buffer})
+                        buffer = ""
+                        break
+
+        if buffer.strip():
+            yield _sse_json({"type": "log", "text": buffer.strip()})
+
+    except asyncio.CancelledError:
+        return
+
+    # Post-stream: check final state for interrupts / terminal states
+    try:
+        snapshot = njm_graph.get_state(config)
+        values = snapshot.values
+
+        if snapshot.next:
+            questions = values.get("interview_questions") or []
+            yield _sse_json({
+                "type": "action_required",
+                "trigger": "GAP_DETECTED",
+                "questions": questions,
+                "gap_report_path": values.get("gap_report_path"),
+                "session_id": session_id,
+                "brand_id": brand_id,
+            })
+
+        elif values.get("estado_validacion") == "BLOQUEO_CEO":
+            yield _sse_json({
+                "type": "action_required",
+                "trigger": "BLOQUEO_CEO",
+                "risk_message": values.get("risk_details", "Revisión CEO requerida."),
+                "session_id": session_id,
+                "brand_id": brand_id,
+            })
+
+    except Exception:
+        pass
+
+    yield _sse_json({"type": "done"})
+
+
 async def _sse_ceo_audit(brand_context: str) -> AsyncGenerator[str, None]:
     """Stream real CEO auditor tokens from LangGraph via astream_events."""
     # Import here to avoid circular imports and keep graph load lazy.
@@ -193,10 +351,19 @@ async def _sse_mock(sequence_id: str) -> AsyncGenerator[str, None]:
 @router.get("/agent/stream")
 async def agent_stream(
     sequenceId: str,
-    brand_context: str = _DEFAULT_BRAND_CONTEXT,
+    brand_id: str = "disrupt",
+    session_id: str = "dev-session-1",
 ):
+    """
+    Unified SSE agent stream.
+
+    sequenceId=ceo-audit  → streams real njm_graph (brand_id + session_id required)
+    sequenceId=<other>    → mock script (pm-execution, ceo-approve, ceo-reject)
+
+    TD-03 resolved: brand_id and session_id now come from query params, not brand_context.
+    """
     if sequenceId == "ceo-audit":
-        generator = _sse_ceo_audit(brand_context)
+        generator = _sse_njm_stream(brand_id, session_id)
     else:
         generator = _sse_mock(sequenceId)
 
