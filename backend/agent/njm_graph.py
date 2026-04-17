@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, Optional
 from uuid import uuid4
 
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -226,8 +226,8 @@ _SSE_SYSTEM_PROMPT = (
     "Si detectas riesgos financieros, operativos o de reputación, señálalos explícitamente."
 )
 
-_SSE_LLM = ChatAnthropic(
-    model="claude-3-5-haiku-20241022",
+_SSE_LLM = ChatOpenAI(
+    model="gpt-4o-mini",
     temperature=0,
     streaming=True,
 )
