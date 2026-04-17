@@ -23,7 +23,7 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from pydantic import ValidationError
 
-from core.estado import NJM_PM_State
+from core.estado import NJM_OS_State
 from core.schemas import EstadoValidacion, LibroVivo, NivelRiesgo
 
 # ══════════════════════════════════════════════════════════════════
@@ -553,6 +553,14 @@ def levantar_tarjeta_roja(
 
 
 # ══════════════════════════════════════════════════════════════════
+# MODELO — singleton de módulo (TD-07)
+# ══════════════════════════════════════════════════════════════════
+
+# Instanciado una sola vez al cargar el módulo. load_dotenv() en main.py
+# debe ejecutarse ANTES de que este módulo sea importado.
+_LLM = ChatAnthropic(model=MODEL_NAME, temperature=0)
+
+# ══════════════════════════════════════════════════════════════════
 # REGISTRO DE HERRAMIENTAS
 # ══════════════════════════════════════════════════════════════════
 
@@ -571,31 +579,29 @@ _TOOL_MAP: Dict[str, Any] = {t.name: t for t in CEO_TOOLS}
 # ══════════════════════════════════════════════════════════════════
 
 
-def nodo_ceo(state: NJM_PM_State) -> Dict[str, Any]:
+def nodo_ceo(state: NJM_OS_State) -> Dict[str, Any]:
     """
     Nodo LangGraph del Agente CEO.
 
     Flujo interno:
-      1. Construye el modelo ChatAnthropic con herramientas enlazadas.
+      1. Vincula herramientas al singleton _LLM.
       2. Inyecta el System Prompt Maestro del CEO al inicio del historial.
       3. Ejecuta el loop agéntico: LLM → Tool calls → ToolMessages → LLM.
       4. Por cada tool call, detecta side-effects en el estado global:
-         - levantar_tarjeta_roja  → estado_validacion = BLOQUEO_CEO + alerta
-         - escribir_libro_vivo    → libro_vivo actualizado + ruta en documentos_generados
+         - levantar_tarjeta_roja         → audit_status=RISK_BLOCKED, risk_flag=True
+         - escribir_libro_vivo           → audit_status=COMPLETE, libro_vivo actualizado
+         - generar_reporte_brechas       → audit_status=GAP_DETECTED, gap_report_path
+         - iniciar_entrevista_profundidad → interview_questions poblado
       5. Devuelve el parche de estado con solo los campos modificados.
 
-    El parche es procesado por LangGraph aplicando los reductores declarados
-    en NJM_PM_State (add_messages para messages, operator.add para listas acumulativas).
-
     Args:
-        state: Estado actual del grafo.
+        state: Estado actual del grafo (NJM_OS_State).
 
     Returns:
         Diccionario con las claves del estado que cambiaron en esta ejecución.
     """
-    # ── 1. Inicializar modelo con herramientas ─────────────────────
-    llm = ChatAnthropic(model=MODEL_NAME, temperature=0)
-    model_with_tools = llm.bind_tools(CEO_TOOLS)
+    # ── 1. Vincular herramientas al singleton ──────────────────────
+    model_with_tools = _LLM.bind_tools(CEO_TOOLS)
 
     # ── 2. Construir historial con System Prompt ───────────────────
     system_message = SystemMessage(content=SYSTEM_PROMPT_CEO.strip())
@@ -607,6 +613,11 @@ def nodo_ceo(state: NJM_PM_State) -> Dict[str, Any]:
     nuevos_documentos: List[str] = []
     nuevo_estado_validacion: Optional[str] = None
     nuevo_libro_vivo: Optional[Dict[str, Any]] = None
+    nuevo_audit_status: Optional[str] = None
+    nuevo_gap_report_path: Optional[str] = None
+    nuevas_interview_questions: Optional[List[str]] = None
+    nuevo_risk_flag: Optional[bool] = None
+    nuevo_risk_details: Optional[str] = None
 
     # ── 4. Loop agéntico ──────────────────────────────────────────
     # El CEO puede encadenar múltiples herramientas antes de responder
@@ -647,39 +658,58 @@ def nodo_ceo(state: NJM_PM_State) -> Dict[str, Any]:
             # ── Side-effects en el estado global ──────────────────
             if nombre_tool == "levantar_tarjeta_roja":
                 nuevo_estado_validacion = EstadoValidacion.BLOQUEO_CEO.value
+                nuevo_audit_status = "RISK_BLOCKED"
+                nuevo_risk_flag = True
+                nuevo_risk_details = args_tool.get("motivo_bloqueo", resultado_str[:200])
                 nuevas_alertas.append(resultado_str)
 
             elif nombre_tool == "escribir_libro_vivo":
                 if resultado_str.startswith("LIBRO VIVO GENERADO EXITOSAMENTE"):
                     ruta = args_tool.get("ruta_destino", "")
                     nuevos_documentos.append(ruta)
-                    # Reconstruir dict del libro vivo desde los datos validados
+                    nuevo_audit_status = "COMPLETE"
                     try:
                         nuevo_libro_vivo = json.loads(args_tool.get("datos_consolidados_vectores", "{}"))
                     except json.JSONDecodeError:
                         pass
 
             elif nombre_tool == "generar_reporte_brechas":
-                # Extraer ruta del reporte del resultado y registrarla
+                nuevo_audit_status = "GAP_DETECTED"
                 for linea in resultado_str.splitlines():
                     if "Ruta:" in linea:
                         ruta_reporte = linea.split("Ruta:", 1)[-1].strip()
                         nuevos_documentos.append(ruta_reporte)
+                        nuevo_gap_report_path = ruta_reporte
                         break
+
+            elif nombre_tool == "iniciar_entrevista_profundidad":
+                vectores = args_tool.get("vectores_objetivo", [])
+                nuevas_interview_questions = [
+                    pregunta
+                    for v_id in vectores
+                    for pregunta in _PREGUNTAS_POR_VECTOR.get(v_id, [])
+                ]
 
     # ── 6. Construir parche de estado ─────────────────────────────
     parche: Dict[str, Any] = {"messages": nuevos_mensajes}
 
     if nuevas_alertas:
         parche["alertas_internas"] = nuevas_alertas
-
     if nuevos_documentos:
         parche["documentos_generados"] = nuevos_documentos
-
     if nuevo_estado_validacion is not None:
         parche["estado_validacion"] = nuevo_estado_validacion
-
     if nuevo_libro_vivo is not None:
         parche["libro_vivo"] = nuevo_libro_vivo
+    if nuevo_audit_status is not None:
+        parche["audit_status"] = nuevo_audit_status
+    if nuevo_gap_report_path is not None:
+        parche["gap_report_path"] = nuevo_gap_report_path
+    if nuevas_interview_questions is not None:
+        parche["interview_questions"] = nuevas_interview_questions
+    if nuevo_risk_flag is not None:
+        parche["risk_flag"] = nuevo_risk_flag
+    if nuevo_risk_details is not None:
+        parche["risk_details"] = nuevo_risk_details
 
     return parche

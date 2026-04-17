@@ -1,99 +1,118 @@
 """
-NJM OS — Estado Global del Agente PM (LangGraph GraphState)
+NJM OS — Estado Unificado del Grafo Multi-Agente
 
-Fuente de verdad: ARCHITECTURE.md § "PM. Memoria / NJM_PM_State"
+Fuente de verdad: ARCHITECTURE_ROADMAP_PHASE2.md § 4 "AgentState Unificado"
 
-Reglas de reducción:
-- messages            → add_messages (LangGraph acumula, nunca sobrescribe)
-- documentos_generados → operator.add  (array acumulativo de rutas locales)
-- alertas_internas    → operator.add  (array acumulativo para el loop de autocorrección)
+Ciclo de vida del estado:
+  ingest_node → ceo_auditor_node → [human_in_loop_node?]
+  → pm_execution_node → [ceo_review_node?] → output_node
+
+Reductores:
+  messages              → add_messages (append, nunca sobrescribe)
+  documentos_generados  → operator.add  (acumulativo)
+  alertas_internas      → operator.add  (acumulativo)
+  uploaded_doc_paths    → operator.add  (acumulativo)
+  Todos los demás       → overwrite (last-write-wins)
 """
 
+from __future__ import annotations
+
 import operator
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 
 class NJM_OS_State(TypedDict):
-    """
-    Estado unificado del grafo multi-agente (CEO + PM).
-    Soporta checkpointing y continuidad de conversación via thread_id.
-    """
+    """Estado unificado del grafo multi-agente NJM OS (Phase 2)."""
+
+    # ── IDENTIDAD DE SESIÓN ────────────────────────────────────────
+    brand_id: str
+    # Slug de la marca. Ej.: "disrupt".
+    # Junto con session_id forma el thread_id: f"{brand_id}:{session_id}"
+
+    session_id: str
+    # UUID v4 por sesión de usuario.
+
+    # ── HISTORIAL DE CONVERSACIÓN ──────────────────────────────────
     messages: Annotated[list, add_messages]
-    modo: str                               # "auditoria" | "ejecucion" | "onboarding"
+    # Acumula HumanMessage, AIMessage y ToolMessage de ambos agentes.
+    # add_messages garantiza append — nunca sobrescribe.
+
+    # ── INPUT DE ONBOARDING ────────────────────────────────────────
+    brand_context_raw: str
+    # Texto crudo extraído de los docs subidos vía /api/v1/ingest.
+    # Fase 2.2: ingest_node lo popula desde ChromaDB. Hasta entonces: string vacío.
+
+    uploaded_doc_paths: Annotated[List[str], operator.add]
+    # Rutas en temp_uploads/ de docs ingeridos. Acumulativo entre sesiones.
+
+    # ── CEO — AUDITORÍA ────────────────────────────────────────────
+    audit_status: Literal["PENDING", "IN_PROGRESS", "GAP_DETECTED", "COMPLETE", "RISK_BLOCKED"]
+    # PENDING      → CEO aún no corrió
+    # GAP_DETECTED → pausa HITL activa (Fase 2.3)
+    # COMPLETE     → libro_vivo escrito y validado
+    # RISK_BLOCKED → tarjeta roja activa
+
+    gap_report_path: Optional[str]
+    # Ruta del 00_GAP_ANALYSIS_*.md generado por CEO si detecta brechas.
+
+    interview_questions: Optional[List[str]]
+    # Preguntas C-Suite generadas por CEO para el Encargado Real.
+    # El frontend las renderiza en el DayCeroView wizard (Fase 2.3).
+
+    human_interview_answers: Optional[str]
+    # Respuestas del humano al cuestionario CEO. Input para el re-audit.
+
+    libro_vivo: Optional[Dict[str, Any]]
+    # JSON final validado por CEO (schema LibroVivo).
+    # READ-ONLY para el PM. Escrito por ceo_auditor_node::escribir_libro_vivo.
+
+    # ── CONTROL DE RIESGO ──────────────────────────────────────────
+    risk_flag: bool
+    # True cuando CEO activa levantar_tarjeta_roja o PM activa BLOQUEO_CEO.
+
+    risk_details: Optional[str]
+    # Descripción del riesgo activo. Enviada al frontend como riskMessage del CEOShield.
+
+    ceo_review_decision: Optional[Literal["APPROVED", "REJECTED", "ESCALATE"]]
+    # Decisión del CEO al revisar output del PM (Fase 2.5).
+
+    # ── PM — EJECUCIÓN ─────────────────────────────────────────────
+    peticion_humano: Optional[str]
+    # Instrucción cruda del Encargado Real para el PM.
+
+    ruta_espacio_trabajo: str
+    # Ruta local donde el PM guarda artefactos.
+
+    skill_activa: Optional[str]
+    # Última skill PM ejecutada. Ej.: "generar_business_case".
+
+    documentos_generados: Annotated[List[str], operator.add]
+    # Rutas absolutas de artefactos generados por el PM. Acumulativo entre nodos.
+
+    estado_validacion: Literal["EN_PROGRESO", "LISTO_PARA_FIRMA", "BLOQUEO_CEO"]
+    # Semáforo de gobernanza del PM.
+
+    alertas_internas: Annotated[List[str], operator.add]
+    # Alertas de autocorrección del PM. Max 2 antes de escalar al CEO.
+
+    # ── OUTPUT ─────────────────────────────────────────────────────
+    payload_tarjeta_sugerencia: Optional[Dict[str, Any]]
+    # TarjetaSugerenciaUI JSON. Emitido por output_node al finalizar el grafo.
+
+    # ── ROUTING INTERNO ────────────────────────────────────────────
+    next_node: Optional[str]
+    # Hint de routing para conditional edges.
+
+    # ── COMPATIBILIDAD DE DESARROLLO ──────────────────────────────
+    modo: str
+    # "auditoria" | "ejecucion" — heredado de la arquitectura anterior.
+
     nombre_marca: str
-    libro_vivo: Dict[str, Any]
-    ruta_espacio_trabajo: str
-    peticion_humano: str
-    skill_activa: Optional[str]
-    estado_validacion: str                  # EN_PROGRESO | BLOQUEO_CEO | LISTO_PARA_FIRMA
-    documentos_generados: Annotated[List[str], operator.add]
-    alertas_internas: Annotated[List[str], operator.add]
-    payload_tarjeta_sugerencia: Optional[Dict[str, Any]]
+    # Nombre legible de la marca. Ej.: "Disrupt". Deprecated: usar brand_id.
 
 
-class NJM_PM_State(TypedDict):
-    """
-    Estado global del Agente PM durante la ejecución de una tarea en NJM OS.
-    Instanciado por LangGraph al inicio de cada petición del Encargado Real.
-    """
-
-    # ─────────────────────────────────────────────────────────────
-    # 1. MEMORIA CORE Y RUTEO
-    # ─────────────────────────────────────────────────────────────
-    messages: Annotated[list, add_messages]
-    # Historial de conversación y llamadas a herramientas (ToolCalls/ToolMessages).
-    # add_messages concatena entradas nuevas sin sobrescribir el historial previo.
-
-    # ─────────────────────────────────────────────────────────────
-    # 2. CONTEXTO INMUTABLE — Handoff del CEO
-    # ─────────────────────────────────────────────────────────────
-    libro_vivo: Dict[str, Any]
-    # JSON completo validado por el Agente CEO (LIBRO_VIVO_SCHEMA).
-    # REGLA: el PM tiene permisos READ-ONLY. Si está vacío, el grafo falla en el nodo de guardia.
-
-    ruta_espacio_trabajo: str
-    # Ruta local absoluta en Claude Cowork donde el agente puede leer/escribir archivos.
-    # Ej.: "/NJM_OS/Marcas/Disrupt/Q3_Campaign/"
-
-    # ─────────────────────────────────────────────────────────────
-    # 3. CONTEXTO DE LA TAREA ACTUAL
-    # ─────────────────────────────────────────────────────────────
-    peticion_humano: str
-    # Instrucción cruda del Encargado Real. Ej.: "Arma la campaña para Q3."
-
-    skill_activa: Optional[str]
-    # Skill metodológica en uso durante este ciclo.
-    # Ej.: "generar_analisis_ansoff". None si el agente aún está razonando.
-
-    # ─────────────────────────────────────────────────────────────
-    # 4. TRAZABILIDAD DE ARTEFACTOS LOCALES — Claude Cowork
-    # ─────────────────────────────────────────────────────────────
-    documentos_generados: Annotated[List[str], operator.add]
-    # Rutas absolutas de los archivos (.docx, .xlsx, .md) creados en este run.
-    # operator.add garantiza que cada nodo annexe su salida sin borrar la del anterior.
-    # La Tarjeta de Sugerencia usará este array para mostrar links clicables al humano.
-
-    # ─────────────────────────────────────────────────────────────
-    # 5. CONTROL DE CALIDAD Y GOBERNANZA
-    # ─────────────────────────────────────────────────────────────
-    estado_validacion: str
-    # Semáforo de gobernanza. Valores válidos (ver schemas.EstadoValidacion):
-    #   "EN_PROGRESO"      → el loop de LangGraph sigue activo.
-    #   "BLOQUEO_CEO"      → el PM falló autocorrección; se detiene y escala.
-    #   "LISTO_PARA_FIRMA" → trabajo validado; payload listo para el frontend.
-
-    alertas_internas: Annotated[List[str], operator.add]
-    # Advertencias inyectadas por el Nodo Evaluador durante el loop de autocorrección.
-    # Ej.: "Error Financiero: Presupuesto propuesto ($5k) excede Vector 5 ($2k)".
-    # Max 2 alertas antes de cambiar estado_validacion a BLOQUEO_CEO.
-
-    # ─────────────────────────────────────────────────────────────
-    # 6. OUTPUT HACIA NEXT.JS — Interfaz
-    # ─────────────────────────────────────────────────────────────
-    payload_tarjeta_sugerencia: Optional[Dict[str, Any]]
-    # JSON final (TARJETA_SUGERENCIA_UI) que el frontend lee para renderizar botones.
-    # Empieza como None. Solo se popula en el último nodo del grafo, garantizando
-    # que Next.js no renderice nada hasta que el trabajo esté 100% validado.
+# Alias de compatibilidad — eliminar en Fase 2.3.
+NJM_PM_State = NJM_OS_State

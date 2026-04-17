@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
-from core.estado import NJM_PM_State
+from core.estado import NJM_OS_State
 from core.schemas import EstadoValidacion
 from tools.pm_skills import PM_SKILLS, _SKILL_MAP
 
@@ -37,6 +37,10 @@ from tools.pm_skills import PM_SKILLS, _SKILL_MAP
 # Claude 3.5 Sonnet — mismo modelo que el CEO para coherencia de ecosistema.
 # temperature=0: el PM es un operador determinista, no un ente creativo libre.
 MODEL_NAME = "claude-3-5-sonnet-20241022"
+
+# Singleton de módulo — evita crear N clientes HTTP por invocación (TD-08).
+# load_dotenv() en main.py debe ejecutarse ANTES de importar este módulo.
+_LLM = ChatAnthropic(model=MODEL_NAME, temperature=0)
 
 # Máximo de iteraciones internas del loop agéntico (techo de seguridad).
 _MAX_ITERACIONES = 12
@@ -158,7 +162,7 @@ def _extraer_rutas_generadas(resultado_tool: str) -> List[str]:
     ]
 
 
-def _construir_prompt_pm(state: NJM_PM_State) -> str:
+def _construir_prompt_pm(state: NJM_OS_State) -> str:
     """
     Construye el System Prompt dinámico del Agente PM inyectando los valores
     de Vector 9 y las restricciones de negocio desde state['libro_vivo'].
@@ -246,7 +250,7 @@ def _construir_prompt_pm(state: NJM_PM_State) -> str:
     )
 
 
-def _guardia_precondiciones(state: NJM_PM_State) -> Optional[str]:
+def _guardia_precondiciones(state: NJM_OS_State) -> Optional[str]:
     """
     Verifica que el estado es válido para que el PM opere.
     Devuelve un mensaje de error si algo falla, None si todo está OK.
@@ -311,7 +315,7 @@ def _parsear_resumen_pm(texto: str) -> Dict[str, str]:
 # ══════════════════════════════════════════════════════════════════
 
 
-def nodo_pm(state: NJM_PM_State) -> Dict[str, Any]:
+def nodo_pm(state: NJM_OS_State) -> Dict[str, Any]:
     """
     Nodo LangGraph del Agente PM.
 
@@ -330,7 +334,7 @@ def nodo_pm(state: NJM_PM_State) -> Dict[str, Any]:
       7. Devuelve el parche de estado mínimo con solo las claves modificadas.
 
     Args:
-        state: Estado actual del grafo (NJM_PM_State).
+        state: Estado actual del grafo (NJM_OS_State).
 
     Returns:
         Parche de estado que LangGraph fusiona usando los reductores declarados:
@@ -353,9 +357,8 @@ def nodo_pm(state: NJM_PM_State) -> Dict[str, Any]:
     system_prompt = _construir_prompt_pm(state)
     system_message = SystemMessage(content=system_prompt)
 
-    # ── 3. Inicializar modelo con las 14 Skills ───────────────────
-    llm = ChatAnthropic(model=MODEL_NAME, temperature=0)
-    model_with_skills = llm.bind_tools(PM_SKILLS)
+    # ── 3. Vincular 14 Skills al singleton ───────────────────────
+    model_with_skills = _LLM.bind_tools(PM_SKILLS)
 
     # ── 4. Construir historial inicial ────────────────────────────
     historial = [system_message] + list(state["messages"])

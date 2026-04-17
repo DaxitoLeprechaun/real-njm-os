@@ -103,7 +103,7 @@ def _extract_text(content: str | list) -> str:
 async def _sse_ceo_audit(brand_context: str) -> AsyncGenerator[str, None]:
     """Stream real CEO auditor tokens from LangGraph via astream_events."""
     # Import here to avoid circular imports and keep graph load lazy.
-    from agent.graph import AgentState, ceo_graph  # noqa: PLC0415
+    from agent.njm_graph import AgentState, ceo_graph  # noqa: PLC0415
 
     initial_state: AgentState = {
         "messages": [
