@@ -378,3 +378,65 @@ async def agent_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ══════════════════════════════════════════════════════════════════
+# GET /api/v1/session/state
+# ══════════════════════════════════════════════════════════════════
+
+@router.get("/session/state")
+async def get_session_state(
+    brand_id: str = "disrupt",
+    session_id: str = "dev-session-1",
+):
+    """Return current checkpointer snapshot for a brand/session thread."""
+    from agent.njm_graph import njm_graph  # noqa: PLC0415
+
+    thread_id = f"{brand_id}:{session_id}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    try:
+        snapshot = njm_graph.get_state(config)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Checkpointer error: {exc}") from exc
+
+    values = snapshot.values if snapshot else {}
+    return {
+        "audit_status": values.get("audit_status", "PENDING"),
+        "interview_questions": values.get("interview_questions"),
+        "last_tarjeta": values.get("payload_tarjeta_sugerencia"),
+        "documentos_count": len(values.get("documentos_generados", [])),
+        "next_interrupt": list(snapshot.next) if snapshot else [],
+    }
+
+
+# ══════════════════════════════════════════════════════════════════
+# POST /api/v1/agent/resume
+# ══════════════════════════════════════════════════════════════════
+
+from pydantic import BaseModel as _BaseModel  # noqa: PLC0415
+
+
+class ResumeRequest(_BaseModel):
+    brand_id: str
+    session_id: str
+    answers: str
+
+
+@router.post("/agent/resume")
+async def agent_resume(body: ResumeRequest):
+    """Resume a graph paused at human_in_loop_node after interview answers are provided."""
+    from agent.njm_graph import njm_graph  # noqa: PLC0415
+
+    thread_id = f"{body.brand_id}:{body.session_id}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    try:
+        await njm_graph.ainvoke(
+            {"human_interview_answers": body.answers},
+            config=config,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Resume failed: {exc}") from exc
+
+    return {"status": "resumed", "thread_id": thread_id}
