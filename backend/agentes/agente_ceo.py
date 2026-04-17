@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from pydantic import ValidationError
@@ -32,7 +32,7 @@ from core.schemas import EstadoValidacion, LibroVivo, NivelRiesgo
 
 # Claude 3.5 Sonnet — especificado en ARCHITECTURE.md § "STACK TÉCNICO"
 # temperature=0 garantiza determinismo máximo para un rol de auditoría.
-MODEL_NAME = "claude-3-5-sonnet-20241022"
+MODEL_NAME = "gpt-4o"
 
 # Extensiones que el CEO tiene permitido leer durante el escaneo.
 _EXTENSIONES_TEXTO = {".txt", ".md", ".json", ".csv"}
@@ -558,7 +558,7 @@ def levantar_tarjeta_roja(
 
 # Instanciado una sola vez al cargar el módulo. load_dotenv() en main.py
 # debe ejecutarse ANTES de que este módulo sea importado.
-_LLM = ChatAnthropic(model=MODEL_NAME, temperature=0)
+_LLM = ChatOpenAI(model=MODEL_NAME, temperature=0)
 
 # ══════════════════════════════════════════════════════════════════
 # REGISTRO DE HERRAMIENTAS
