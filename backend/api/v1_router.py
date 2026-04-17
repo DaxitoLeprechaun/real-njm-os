@@ -6,7 +6,8 @@ Endpoints:
   GET  /api/v1/agent/stream    — SSE agent stream
     ?sequenceId=ceo-audit      → real LangGraph + Claude streaming
     ?sequenceId=<other>        → mock script (pm-execution, ceo-approve, ceo-reject)
-    ?brand_context=<text>      — optional brand context for ceo-audit (default: demo brand)
+    ?brand_id=<str>            — brand slug (default: disrupt)
+    ?session_id=<str>          — session UUID (default: dev-session-1)
 """
 
 from __future__ import annotations
@@ -153,6 +154,8 @@ async def _sse_njm_stream(
       {"type": "log",            "text": "..."}
       {"type": "action_required", "trigger": "BLOQUEO_CEO"|"GAP_DETECTED", ...}
       {"type": "done"}
+
+    Note: {"type": "done"} is NOT emitted on client disconnect (CancelledError).
     """
     from agent.njm_graph import njm_graph  # noqa: PLC0415
     from core.dev_fixtures import _LIBRO_VIVO_DISRUPT  # noqa: PLC0415
@@ -197,10 +200,10 @@ async def _sse_njm_stream(
             "ruta_espacio_trabajo": f"~/NJM_OS/Marcas/{brand_id}/workspace/",
             "risk_flag": False,
             "estado_validacion": "EN_PROGRESO",
+            "peticion_humano": None,
         }
 
     yield _sse_json({"type": "log", "text": f"[⏳] Conectando con NJM OS (brand: {brand_id})..."})
-    await asyncio.sleep(0.05)
 
     buffer: str = ""
 
@@ -270,8 +273,8 @@ async def _sse_njm_stream(
                 "brand_id": brand_id,
             })
 
-    except Exception:
-        pass
+    except Exception as exc:
+        yield _sse_json({"type": "log", "text": f"[!] No se pudo leer estado final: {exc}"})
 
     yield _sse_json({"type": "done"})
 
