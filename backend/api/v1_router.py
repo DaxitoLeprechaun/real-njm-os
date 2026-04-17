@@ -40,21 +40,27 @@ async def ingest_document(
     from core import ingest as _ingest  # noqa: PLC0415
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    dest = UPLOAD_DIR / file.filename
+    safe_filename = Path(file.filename).name
+    dest = UPLOAD_DIR / safe_filename
     contents = await file.read()
     dest.write_bytes(contents)
 
     try:
         chunks_stored = await asyncio.to_thread(
-            _ingest.ingest_document, brand_id, contents, file.filename
+            _ingest.ingest_document, brand_id, contents, safe_filename
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al indexar el documento: {exc}",
+        ) from exc
 
     return {
         "status": "success",
         "message": "Documento procesado e indexado",
-        "filename": file.filename,
+        "filename": safe_filename,
         "brand_id": brand_id,
         "chunks_stored": chunks_stored,
     }

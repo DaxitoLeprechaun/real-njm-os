@@ -372,6 +372,7 @@ def nodo_pm(state: NJM_OS_State) -> Dict[str, Any]:
     skill_utilizada: Optional[str] = None
 
     # ── 6. Loop agéntico ──────────────────────────────────────────
+    _PM_TOOL_MAP = {**_SKILL_MAP, _buscar_contexto.name: _buscar_contexto}
     for iteracion in range(_MAX_ITERACIONES):
 
         respuesta: AIMessage = model_with_skills.invoke(historial + nuevos_mensajes)
@@ -382,7 +383,6 @@ def nodo_pm(state: NJM_OS_State) -> Dict[str, Any]:
             break
 
         # ── Ejecutar cada tool call ──────────────────────────────
-        _PM_TOOL_MAP = {**_SKILL_MAP, _buscar_contexto.name: _buscar_contexto}
         for tc in respuesta.tool_calls:
             nombre_skill = tc["name"]
             args_skill = tc["args"]

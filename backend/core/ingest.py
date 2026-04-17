@@ -25,9 +25,8 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
     """
     lower = filename.lower()
     if lower.endswith(".pdf"):
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        pages = [page.get_text() for page in doc]
-        doc.close()
+        with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+            pages = [page.get_text() for page in doc]
         return "\n".join(pages)
 
     return file_bytes.decode("utf-8", errors="replace")

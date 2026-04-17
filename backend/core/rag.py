@@ -7,6 +7,7 @@ Client is a module-level singleton (one HTTP/file handle per process).
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import List
 
@@ -18,24 +19,29 @@ _EMBED_MODEL = "text-embedding-3-small"
 
 _client: chromadb.ClientAPI | None = None
 _embed_fn: OpenAIEmbeddingFunction | None = None
+_init_lock = threading.Lock()
 
 
 def _get_client() -> chromadb.ClientAPI:
     global _client
     if _client is None:
-        _CHROMA_PATH.mkdir(parents=True, exist_ok=True)
-        _client = chromadb.PersistentClient(path=str(_CHROMA_PATH))
+        with _init_lock:
+            if _client is None:
+                _CHROMA_PATH.mkdir(parents=True, exist_ok=True)
+                _client = chromadb.PersistentClient(path=str(_CHROMA_PATH))
     return _client
 
 
 def _get_embed_fn() -> OpenAIEmbeddingFunction:
     global _embed_fn
     if _embed_fn is None:
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        _embed_fn = OpenAIEmbeddingFunction(
-            api_key=api_key,
-            model_name=_EMBED_MODEL,
-        )
+        with _init_lock:
+            if _embed_fn is None:
+                api_key = os.environ.get("OPENAI_API_KEY", "")
+                _embed_fn = OpenAIEmbeddingFunction(
+                    api_key=api_key,
+                    model_name=_EMBED_MODEL,
+                )
     return _embed_fn
 
 
