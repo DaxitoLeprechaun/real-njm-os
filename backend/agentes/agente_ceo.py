@@ -25,6 +25,7 @@ from pydantic import ValidationError
 
 from core.estado import NJM_OS_State
 from core.schemas import EstadoValidacion, LibroVivo, NivelRiesgo
+from tools.retrieval_tool import buscar_contexto_marca
 
 # ══════════════════════════════════════════════════════════════════
 # CONFIGURACIÓN DEL MODELO
@@ -570,6 +571,7 @@ CEO_TOOLS = [
     iniciar_entrevista_profundidad,
     escribir_libro_vivo,
     levantar_tarjeta_roja,
+    buscar_contexto_marca,
 ]
 
 _TOOL_MAP: Dict[str, Any] = {t.name: t for t in CEO_TOOLS}
