@@ -33,7 +33,7 @@ def test_agent_stream_accepts_brand_id_and_session_id(monkeypatch):
     """GET /api/v1/agent/stream must accept brand_id and session_id params."""
     from agent import njm_graph as graph_mod
 
-    async def fake_astream_events(state, config, version):
+    async def fake_astream_events(state, config, version="v2", **_kwargs):
         yield {"event": "on_chain_end", "name": "output", "data": {}}
 
     monkeypatch.setattr(graph_mod.njm_graph, "astream_events", fake_astream_events)
@@ -63,7 +63,7 @@ def test_agent_stream_emits_done_event(monkeypatch):
     """SSE stream must always end with a done event."""
     from agent import njm_graph as graph_mod
 
-    async def fake_astream_events(state, config, version):
+    async def fake_astream_events(state, config, version="v2", **_kwargs):
         yield {"event": "on_chain_end", "name": "output", "data": {}}
 
     monkeypatch.setattr(graph_mod.njm_graph, "astream_events", fake_astream_events)
@@ -94,7 +94,7 @@ def test_agent_stream_emits_action_required_on_bloqueo_ceo(monkeypatch):
     """SSE must emit action_required event when final state is BLOQUEO_CEO."""
     from agent import njm_graph as graph_mod
 
-    async def fake_astream_events(state, config, version):
+    async def fake_astream_events(state, config, version="v2", **_kwargs):
         yield {"event": "on_chain_end", "name": "output", "data": {}}
 
     monkeypatch.setattr(graph_mod.njm_graph, "astream_events", fake_astream_events)
@@ -131,24 +131,19 @@ def test_agent_stream_emits_action_required_on_gap_detected(monkeypatch):
     """SSE must emit action_required with trigger GAP_DETECTED when graph pauses."""
     from agent import njm_graph as graph_mod
 
-    async def fake_astream_events(state, config, version):
+    async def fake_astream_events(state, config, version="v2", **_kwargs):
         yield {"event": "on_chain_end", "name": "human_in_loop", "data": {}}
 
     monkeypatch.setattr(graph_mod.njm_graph, "astream_events", fake_astream_events)
 
     def fake_get_state(config):
-        class _FakeTask:
-            class _Interrupt:
-                value = {"type": "interview_required", "questions": ["Q1", "Q2"]}
-            interrupts = [_Interrupt()]
-
         class _Snap:
             values = {
                 "audit_status": "GAP_DETECTED",
                 "interview_questions": ["Q1", "Q2"],
             }
             next = ["ceo_auditor"]
-            tasks = [_FakeTask()]
+            tasks = []
         return _Snap()
 
     monkeypatch.setattr(graph_mod.njm_graph, "get_state", fake_get_state)
@@ -206,7 +201,7 @@ def test_agent_resume_endpoint_invokes_graph(monkeypatch):
 
     invoked_with = []
 
-    async def fake_ainvoke(state, config):
+    async def fake_ainvoke(state, *, config=None):
         invoked_with.append({"state": state, "config": config})
         return {}
 
