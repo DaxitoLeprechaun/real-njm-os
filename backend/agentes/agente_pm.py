@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
 from core.estado import NJM_OS_State
@@ -36,11 +36,11 @@ from tools.pm_skills import PM_SKILLS, _SKILL_MAP
 
 # Claude 3.5 Sonnet — mismo modelo que el CEO para coherencia de ecosistema.
 # temperature=0: el PM es un operador determinista, no un ente creativo libre.
-MODEL_NAME = "claude-3-5-sonnet-20241022"
+MODEL_NAME = "gpt-4o"
 
 # Singleton de módulo — evita crear N clientes HTTP por invocación (TD-08).
 # load_dotenv() en main.py debe ejecutarse ANTES de importar este módulo.
-_LLM = ChatAnthropic(model=MODEL_NAME, temperature=0)
+_LLM = ChatOpenAI(model=MODEL_NAME, temperature=0)
 
 # Máximo de iteraciones internas del loop agéntico (techo de seguridad).
 _MAX_ITERACIONES = 12
