@@ -37,10 +37,11 @@ Requires `backend/.env` with `OPENAI_API_KEY=sk-...`
 ### Run tests
 ```bash
 cd backend
-.venv/bin/python3 -m pytest tests/ -v          # all tests
+.venv/bin/python3 -m pytest tests/ -v               # all tests
 .venv/bin/python3 -m pytest tests/test_rag.py -v    # single file
+.venv/bin/python3 -m pytest tests/test_v1_sse.py -v # SSE endpoint tests (no real API calls — monkeypatched)
 ```
-Tests that call `upsert_chunks` or `query_brand` make real OpenAI embedding API calls — requires a valid key in `backend/.env`.
+Tests that call `upsert_chunks` or `query_brand` make real OpenAI embedding API calls — requires a valid key in `backend/.env`. SSE tests mock `njm_graph` fully and run without a key.
 
 ### Smoke test (verify graph compiles and agents load)
 ```bash
@@ -108,7 +109,7 @@ NJM OS is a monorepo: FastAPI + LangGraph backend, Next.js 14 frontend.
 |---|---|
 | `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers. `load_dotenv()` **must run before any agent module is imported** — agents instantiate `ChatOpenAI` at module level. |
 | `api/main.py` | `POST /api/ejecutar-tarea` — invokes `njm_graph` (async via `asyncio.to_thread`). Resolves `brand_id`/`session_id` with dev fallback (see below). |
-| `api/v1_router.py` | `POST /api/v1/ingest` (file upload + RAG pipeline) + `GET /api/v1/agent/stream` (SSE) |
+| `api/v1_router.py` | `POST /api/v1/ingest` + `GET /api/v1/agent/stream` (SSE, unified via `njm_graph`) + `GET /api/v1/session/state` (checkpointer hydration) + `POST /api/v1/agent/resume` (graph resumption after interrupt) |
 | `agent/njm_graph.py` | **Single source of graphs.** Exports `njm_graph` (6-node full graph, `SqliteSaver` checkpointer on `njm_sessions.db`) and `ceo_graph` + `AgentState`. `load_dotenv()` must precede import. |
 | `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 6 tools (5 original + `buscar_contexto_marca`), agentic loop (max 10 iters). Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
 | `agentes/agente_pm.py` | `nodo_pm` — PM node with 15 tools (14 PM skills + `buscar_contexto_marca`), max 12 iters. Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
@@ -176,12 +177,18 @@ Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (
 - `generar_reporte_brechas` → `audit_status="GAP_DETECTED"`, `gap_report_path`
 - `iniciar_entrevista_profundidad` → `interview_questions=[...]`
 
-**SSE endpoint (`GET /api/v1/agent/stream?sequenceId=...`):**
-- `ceo-audit` → real LangGraph streaming via `astream_events(version="v2")`, filters `on_chat_model_stream`, uses `ceo_graph`
-- `pm-execution`, `ceo-approve`, `ceo-reject` → hardcoded mock scripts
-- All sequences terminate with `data: [DONE]\n\n`
+**SSE endpoint (`GET /api/v1/agent/stream?sequenceId=...&brand_id=...&session_id=...`):**
+- `ceo-audit` → streams full `njm_graph` via `astream_events(version="v2")`. Emits JSON events: `{"type":"log","text":"..."}`, `{"type":"action_required","trigger":"BLOQUEO_CEO"|"GAP_DETECTED",...}`, `{"type":"done"}`. Dev fallback: `brand_id="disrupt"` injects `_LIBRO_VIVO_DISRUPT` + skips CEO.
+- `pm-execution`, `ceo-approve`, `ceo-reject` → hardcoded mock scripts (plain-text, legacy `[DONE]` sentinel — Phase 2.4 will wire real PM streaming)
+- Post-stream: calls `njm_graph.get_state()` to detect `BLOQUEO_CEO` or graph interrupt (`snapshot.next` truthy) and emit `action_required` event before `done`.
 
-**Models:** `gpt-4o-mini` (SSE `ceo_graph`), `gpt-4o` (both agent nodes). All `temperature=0`.
+**Session endpoints (Phase 2.3):**
+- `GET /api/v1/session/state?brand_id=&session_id=` → returns `{audit_status, interview_questions, last_tarjeta, documentos_count, next_interrupt}` from checkpointer
+- `POST /api/v1/agent/resume` body `{brand_id, session_id, answers}` → resumes graph paused at `human_in_loop_node` via `njm_graph.ainvoke({"human_interview_answers": answers}, config)`
+
+**Thread ID convention:** `thread_id = f"{brand_id}:{session_id}"` — used consistently across all three endpoints and the SSE generator.
+
+**Models:** `gpt-4o` (both agent nodes). All `temperature=0`.
 
 **Data contract flow:**
 ```
@@ -211,7 +218,7 @@ frontend/app/
 **Key components:**
 - `components/njm/` — business components: `Sidebar`, `BrandCard`, `VectorCard`, `SlideOver`, `AgentConsole`, `CEOShield`
 - `components/ui/` — Shadcn UI primitives — **do not modify**. Uses `@base-ui/react` internally (not standard Radix); `Dialog` controlled mode: `<Dialog open={bool} onOpenChange={setFn}>`.
-- `hooks/useAgentConsole` — call `invoke(sequenceId)` to open SSE; exposes `open`, `logs`, `running`, `close`.
+- `hooks/useAgentConsole` — `invoke(sequenceId, params?)` opens SSE with optional `{brand_id, session_id}`; exposes `open`, `logs`, `running`, `close`, `actionRequired` (set on `action_required` JSON event), `resume(answers, params)` (calls `POST /api/v1/agent/resume`). Handles both JSON events (new `ceo-audit`) and legacy plain-text (mock sequences).
 - `CEOShield` — brutalist Dialog modal (2px rose-600 border). `onApprove` → `invoke("ceo-approve")`, `onReject` → `invoke("ceo-reject")`.
 
 **Mock data state:** `ceo/page.tsx` (`MOCK_VECTORES`) and `pm/page.tsx` (`MOCK_ARTEFACTOS`) render hardcoded data. Neither connected to real backend state. "Consultar PM" invokes mock `pm-execution` SSE script.
@@ -232,9 +239,10 @@ When Tailwind JIT can't resolve dynamic HSL strings, use CSS variables: `hsl(var
 **Design constraints:** Never use chat bubble interfaces. `nature-bg.jpg` lives in `frontend/public/`.
 
 **Not yet built (see ARCHITECTURE_ROADMAP_PHASE2.md):**
-- Phase 2.3: Human-in-the-Loop (`interrupt()`, `POST /api/v1/agent/resume`, `GET /api/v1/session/state`, DayCeroView wizard)
-- Phase 2.4: PM SSE streaming real (eliminate `pm-execution` mock)
-- Phase 2.5: CEOShield wired to real `BLOQUEO_CEO` events
+- Phase 2.3 partial: `interrupt()` in `human_in_loop_node` (stub auto-completes), DayCeroView wizard in CEO Workspace, `actionRequired` from hook not yet consumed in any page UI
+- Phase 2.4: PM SSE streaming real (eliminate `pm-execution` mock), connect "Consultar PM" button to real graph
+- Phase 2.5: CEOShield wired to real `BLOQUEO_CEO` events (currently manual button)
 - Phase 2.6: retry/tenacity, structured PM output, `Last-Event-ID` SSE reconnect, CORS env var
 - Frontend contexts: `AgencyContext`, `BrandContext`, `data/brands.ts`
 - Graph `ingest` node wired to real ChromaDB pipeline (currently passthrough stub)
+- `MOCK_VECTORES` (`ceo/page.tsx`) and `MOCK_ARTEFACTOS` (`pm/page.tsx`) still hardcoded — not yet connected to real backend state
