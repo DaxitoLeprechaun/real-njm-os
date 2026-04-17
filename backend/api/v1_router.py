@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
 
@@ -32,19 +32,31 @@ UPLOAD_DIR = Path(__file__).resolve().parent.parent / "temp_uploads"
 @router.post("/ingest")
 async def ingest_document(
     file: UploadFile = File(...),
+    brand_id: str = Form(default="disrupt"),
     context: str = Form(default=""),
     vectorId: str = Form(default=""),
 ):
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    import asyncio
+    from core import ingest as _ingest  # noqa: PLC0415
 
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     dest = UPLOAD_DIR / file.filename
     contents = await file.read()
     dest.write_bytes(contents)
 
+    try:
+        chunks_stored = await asyncio.to_thread(
+            _ingest.ingest_document, brand_id, contents, file.filename
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     return {
         "status": "success",
-        "message": "Documento procesado",
+        "message": "Documento procesado e indexado",
         "filename": file.filename,
+        "brand_id": brand_id,
+        "chunks_stored": chunks_stored,
     }
 
 
