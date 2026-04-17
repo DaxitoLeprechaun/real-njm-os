@@ -29,6 +29,7 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from core.estado import NJM_OS_State
 from core.schemas import EstadoValidacion
 from tools.pm_skills import PM_SKILLS, _SKILL_MAP
+from tools.retrieval_tool import buscar_contexto_marca as _buscar_contexto
 
 # ══════════════════════════════════════════════════════════════════
 # CONFIGURACIÓN DEL MODELO
@@ -357,8 +358,9 @@ def nodo_pm(state: NJM_OS_State) -> Dict[str, Any]:
     system_prompt = _construir_prompt_pm(state)
     system_message = SystemMessage(content=system_prompt)
 
-    # ── 3. Vincular 14 Skills al singleton ───────────────────────
-    model_with_skills = _LLM.bind_tools(PM_SKILLS)
+    # ── 3. Vincular 14 Skills + retrieval tool al singleton ──────
+    _ALL_PM_TOOLS = PM_SKILLS + [_buscar_contexto]
+    model_with_skills = _LLM.bind_tools(_ALL_PM_TOOLS)
 
     # ── 4. Construir historial inicial ────────────────────────────
     historial = [system_message] + list(state["messages"])
@@ -380,6 +382,7 @@ def nodo_pm(state: NJM_OS_State) -> Dict[str, Any]:
             break
 
         # ── Ejecutar cada tool call ──────────────────────────────
+        _PM_TOOL_MAP = {**_SKILL_MAP, _buscar_contexto.name: _buscar_contexto}
         for tc in respuesta.tool_calls:
             nombre_skill = tc["name"]
             args_skill = tc["args"]
@@ -390,7 +393,7 @@ def nodo_pm(state: NJM_OS_State) -> Dict[str, Any]:
             parche["skill_activa"] = nombre_skill
 
             # Ejecutar la skill.
-            skill_fn = _SKILL_MAP.get(nombre_skill)
+            skill_fn = _PM_TOOL_MAP.get(nombre_skill)
             if skill_fn is None:
                 resultado_str = (
                     f"ERROR: Skill '{nombre_skill}' no está registrada en PM_SKILLS. "
