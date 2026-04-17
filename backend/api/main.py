@@ -121,13 +121,13 @@ def _payload_sin_documentos(peticion: str) -> Dict[str, Any]:
 )
 async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
     # ── Guardia: API Key ──────────────────────────────────────────
-    if not os.getenv("ANTHROPIC_API_KEY"):
+    if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
-                "error": "ANTHROPIC_API_KEY no configurada.",
+                "error": "OPENAI_API_KEY no configurada.",
                 "detalle": (
-                    "Crea el archivo backend/.env con ANTHROPIC_API_KEY=sk-ant-... "
+                    "Crea el archivo backend/.env con OPENAI_API_KEY=sk-... "
                     "y reinicia el servidor."
                 ),
                 "id_transaccion": str(uuid4()),

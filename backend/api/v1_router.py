@@ -87,10 +87,10 @@ _DEFAULT_BRAND_CONTEXT = (
 
 
 def _extract_text(content: str | list) -> str:
-    """Normalize Anthropic streaming content blocks to plain text."""
+    """Normalize LLM streaming chunk content to plain text."""
     if isinstance(content, str):
         return content
-    # Anthropic returns list of dicts: [{"type": "text", "text": "...", "index": 0}]
+    # Fallback for non-str content (unused with OpenAI; kept for safety)
     parts: list[str] = []
     for block in content:
         if isinstance(block, dict) and block.get("type") == "text":
