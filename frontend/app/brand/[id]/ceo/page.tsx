@@ -66,6 +66,10 @@ export default function CEOWorkspacePage({
 
   const agentConsole = useAgentConsole();
 
+  const sessionIdRef = useRef<string>(
+    typeof crypto !== "undefined" ? crypto.randomUUID() : "dev-session-1"
+  );
+
   function handleCargarDoc(vectorId: string) {
     setActiveVectorId(vectorId);
     setManualInput("");
@@ -74,7 +78,10 @@ export default function CEOWorkspacePage({
   }
 
   function handleInvocarCEO() {
-    agentConsole.invoke("ceo-audit");
+    agentConsole.invoke("ceo-audit", {
+      brand_id: params.id,
+      session_id: sessionIdRef.current,
+    });
   }
 
   async function handleIngest() {
