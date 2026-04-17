@@ -34,6 +34,18 @@ Use `.venv/bin/python3` (not `source .venv/bin/activate`) to avoid shell state i
 
 Requires `backend/.env` with `ANTHROPIC_API_KEY=sk-ant-...`
 
+### Smoke test (verify graph compiles and agents load)
+```bash
+cd backend
+.venv/bin/python3 -c "
+import os; os.environ.setdefault('ANTHROPIC_API_KEY','test')
+from agent.njm_graph import njm_graph, ceo_graph
+from agentes.agente_ceo import nodo_ceo
+from agentes.agente_pm import nodo_pm
+print([n for n in njm_graph.get_graph().nodes])
+"
+```
+
 ### Frontend (Next.js)
 ```bash
 cd frontend
@@ -57,39 +69,75 @@ http://localhost:8000/health    # health check
 NJM OS is a monorepo: FastAPI + LangGraph backend, Next.js 14 frontend.
 
 - `ARCHITECTURE.md` — full product design source of truth (business logic, agent prompts, data schemas)
-- `ARCHITECTURE_ROADMAP_PHASE2.md` — Phase 2 technical roadmap: unified multi-agent graph design, RAG pipeline, checkpointer strategy, and full audit of current technical debt
+- `ARCHITECTURE_ROADMAP_PHASE2.md` — Phase 2 technical roadmap and audit. **Source of truth for what's built vs. pending.**
 
 ### Backend modules
 
 | Module | Role |
 |---|---|
-| `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers |
-| `api/main.py` | `POST /api/ejecutar-tarea` — invokes `unified_graph` (async via `asyncio.to_thread`); hardcodes `_LIBRO_VIVO_DISRUPT` as the test brand |
+| `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers. `load_dotenv()` **must run before any agent module is imported** — agents instantiate `ChatAnthropic` at module level. |
+| `api/main.py` | `POST /api/ejecutar-tarea` — invokes `njm_graph` (async via `asyncio.to_thread`). Resolves `brand_id`/`session_id` with dev fallback (see below). |
 | `api/v1_router.py` | `POST /api/v1/ingest` (file upload placeholder) + `GET /api/v1/agent/stream` (SSE) |
-| `agent/graph.py` | Two compiled graphs: `unified_graph` (CEO+PM, SqliteSaver checkpointer) and `ceo_graph` (streaming-only CEO for SSE). `load_dotenv()` in `main.py` **must run before this module is imported** — it instantiates `ChatAnthropic` at module level (`_LLM`). |
-| `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 5 tools, agentic loop (max 10 iters); wired into `unified_graph` |
-| `agentes/agente_pm.py` | `nodo_pm` — PM node with 14 skill tools, max 12 iters, max 2 autocorrection alerts; wired into `unified_graph` |
-| `core/estado.py` | `NJM_OS_State` TypedDict — LangGraph state contract |
+| `agent/njm_graph.py` | **Single source of graphs.** Exports `njm_graph` (6-node full graph, `SqliteSaver` checkpointer on `njm_sessions.db`) and `ceo_graph` + `AgentState` (SSE streaming compat). `load_dotenv()` must precede import. |
+| `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 5 tools, agentic loop (max 10 iters). Module-level singleton `_LLM = ChatAnthropic(...)`. |
+| `agentes/agente_pm.py` | `nodo_pm` — PM node with 14 skill tools, max 12 iters, max 2 autocorrection alerts. Module-level singleton `_LLM`. |
+| `core/estado.py` | `NJM_OS_State` TypedDict — 23-field unified LangGraph state. `NJM_PM_State` is an alias (deprecated). |
+| `core/dev_fixtures.py` | `_LIBRO_VIVO_DISRUPT` mock + `DEV_BRAND_ID`/`DEV_SESSION_ID` constants. Only imported in dev fallback paths — never in production. |
 | `core/schemas.py` | Pydantic v2: `LibroVivo` (9 vectors), `TarjetaSugerenciaUI`, `EstadoValidacion` enum |
 | `tools/pm_skills.py` | 14 `@tool`-decorated PM skills (business case, Ansoff, PRD, etc.) |
 
-**Graph topology** (`unified_graph`): `START → router_node → ceo_node → [END | pm_node] → END`. Routing: `modo="auditoria"` or empty `libro_vivo` → CEO first; `modo="ejecucion"` + populated `libro_vivo` → PM directly. Post-CEO edge: `BLOQUEO_CEO` → END, `LISTO_PARA_FIRMA` + libro_vivo → PM. Checkpointer: `SqliteSaver` on `njm_checkpoints.db`; pass `{"configurable": {"thread_id": "..."}}` to `invoke`/`astream_events` for multi-turn memory.
+### Graph topology (`njm_graph`) — Phase 2.1
+
+```
+START → ingest [STUB] → ceo_auditor → human_in_loop [STUB] → ceo_auditor (re-run)
+                             ↓ COMPLETE
+                       pm_execution → output → END
+                             ↓ BLOQUEO_CEO
+                        ceo_review [STUB] → output → END
+```
+
+Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (set by PM):
+
+| Condition | Route |
+|---|---|
+| `audit_status == "COMPLETE"` | `ceo_auditor → pm_execution` |
+| `audit_status == "GAP_DETECTED"` | `ceo_auditor → human_in_loop` |
+| `audit_status == "RISK_BLOCKED"` | `ceo_auditor → output` |
+| `estado_validacion == "LISTO_PARA_FIRMA"` | `pm_execution → output` |
+| `estado_validacion == "BLOQUEO_CEO"` | `pm_execution → ceo_review` |
+
+**Stub nodes (Phase 2.1):**
+- `ingest` — passthrough. Real ChromaDB ingestion in Phase 2.2.
+- `human_in_loop` — auto-sets `audit_status="COMPLETE"` + injects `_LIBRO_VIVO_DISRUPT`. Real `interrupt()` in Phase 2.3.
+- `ceo_review` — auto-sets `ceo_review_decision="REJECTED"` → routes to output. Real CEOShield in Phase 2.5.
+
+**CEO skip guard:** `ceo_auditor_node` returns `{}` immediately if `state["audit_status"] == "COMPLETE"`, preventing redundant LLM calls after `human_in_loop` stub.
+
+**Checkpointer:** `SqliteSaver` on `./njm_sessions.db`. `thread_id = f"{brand_id}:{session_id}"`. Pass `{"configurable": {"thread_id": thread_id}}` to every `invoke`/`astream_events` call.
+
+**Dev fallback** (`api/main.py`): if `brand_id` is empty → `"disrupt"`, `session_id` empty → `"dev-session-1"`. When `brand_id == "disrupt"`, injects `_LIBRO_VIVO_DISRUPT` and sets `audit_status="COMPLETE"` so CEO is skipped and PM runs directly.
+
+**CEO tools side-effects on state:**
+- `escribir_libro_vivo` → `audit_status="COMPLETE"`, `libro_vivo={...}`
+- `levantar_tarjeta_roja` → `audit_status="RISK_BLOCKED"`, `risk_flag=True`, `risk_details`
+- `generar_reporte_brechas` → `audit_status="GAP_DETECTED"`, `gap_report_path`
+- `iniciar_entrevista_profundidad` → `interview_questions=[...]`
 
 **SSE endpoint (`GET /api/v1/agent/stream?sequenceId=...`):**
-- `ceo-audit` → real LangGraph streaming via `astream_events(version="v2")`, filters `on_chat_model_stream`
+- `ceo-audit` → real LangGraph streaming via `astream_events(version="v2")`, filters `on_chat_model_stream`, uses `ceo_graph` from `njm_graph.py`
 - `pm-execution`, `ceo-approve`, `ceo-reject` → hardcoded mock scripts with `asyncio.sleep` delays
 - All sequences terminate with `data: [DONE]\n\n`
 - Anthropic streaming returns `chunk.content` as either `str` or `list[dict]` — `_extract_text()` normalizes both
 
-**`POST /api/v1/ingest` is a placeholder** — saves files to `backend/temp_uploads/` but does not extract text, embed, or connect to the CEO's `escanear_directorio_onboarding` tool (which reads from `~/NJM_OS/`).
+**Models:** `claude-3-5-haiku-20241022` (SSE `ceo_graph`), `claude-3-5-sonnet-20241022` (both agent nodes). All `temperature=0`.
 
-**Models:** `claude-3-5-haiku-20241022` (streaming in `agent/graph.py`), `claude-3-5-sonnet-20241022` (both agent nodes). All at `temperature=0`.
+**`POST /api/v1/ingest` is a placeholder** — saves files to `backend/temp_uploads/` but does not extract text, embed, or connect to `escanear_directorio_onboarding` (which reads from `~/NJM_OS/`). Phase 2.2 work.
 
 **Data contract flow:**
 ```
-LibroVivo (9 vectors, CEO-validated JSON)
-  → NJM_PM_State (injected by api/main.py — currently hardcoded)
-  → nodo_pm (agentes/agente_pm.py, agentic loop)
+NJM_OS_State.libro_vivo (9 vectors, CEO-validated JSON)
+  → nodo_pm reads libro_vivo to build dynamic system prompt
+  → PM agentic loop with 14 skills
   → payload_tarjeta_sugerencia (TarjetaSugerenciaUI JSON → Next.js)
 ```
 
@@ -97,9 +145,7 @@ LibroVivo (9 vectors, CEO-validated JSON)
 - `LISTO_PARA_FIRMA` → green card, file attachments, approve button
 - `BLOQUEO_CEO` → red banner, error log, escalation buttons
 
-**CEO tools** (in `agente_ceo.py`, currently orphaned): `escanear_directorio_onboarding`, `generar_reporte_brechas`, `iniciar_entrevista_profundidad`, `escribir_libro_vivo`, `levantar_tarjeta_roja`. Scans `~/NJM_OS/` for onboarding docs.
-
-**Active PM skills** are set per-brand in `vector_9_perfil_pm.skills_especificas_activas`. The hardcoded test brand (`_LIBRO_VIVO_DISRUPT` in `api/main.py`) activates: `generar_business_case`, `generar_analisis_ansoff`, `generar_prd`, `generar_plan_demanda`, `evaluar_preparacion_lanzamiento`.
+**Active PM skills** are set per-brand in `vector_9_perfil_pm.skills_especificas_activas`. The dev brand (`_LIBRO_VIVO_DISRUPT`) activates: `generar_business_case`, `generar_analisis_ansoff`, `generar_prd`, `generar_plan_demanda`, `evaluar_preparacion_lanzamiento`.
 
 ### Frontend: Next.js 14 App Router
 
@@ -150,12 +196,10 @@ When Tailwind JIT can't resolve dynamic HSL strings, use CSS variables: `hsl(var
 - Auth mock: `localStorage.getItem("njm-auth") === "true"` (not yet built).
 - PM Workspace gated: only accessible after CEO validates all vectors + signs Libro Vivo.
 
-**Not yet built (see ARCHITECTURE_ROADMAP_PHASE2.md for implementation plan):**
-- Unified multi-agent LangGraph (`njm_graph`) with `NJM_OS_State`, checkpointer, and real CEO → PM handoff
-- Real ingest pipeline (text extraction + ChromaDB embedding)
-- Typed SSE events (currently plain text — Phase 2 adds JSON events)
-- `POST /api/v1/agent/resume` endpoint for Human-in-the-Loop graph resumption
-- `GET /api/v1/session/state` endpoint to hydrate frontend from checkpointer
-- `context/` — `AgencyContext` and `BrandContext`
-- `data/` — `brands.ts`, `ceoManagement.ts`, `pmManagement.ts`
-- DayCeroView onboarding wizard (4-step)
+**Not yet built (see ARCHITECTURE_ROADMAP_PHASE2.md):**
+- Phase 2.2: real ingest pipeline (text extraction + ChromaDB embedding)
+- Phase 2.3: Human-in-the-Loop (`interrupt()`, `POST /api/v1/agent/resume`, `GET /api/v1/session/state`, `useAgentConsole` params, DayCeroView wizard)
+- Phase 2.4: PM SSE streaming real (eliminate `pm-execution` mock)
+- Phase 2.5: CEOShield wired to real `BLOQUEO_CEO` events
+- Phase 2.6: retry/tenacity, structured PM output, `Last-Event-ID` SSE reconnect, CORS env var
+- Frontend contexts: `AgencyContext`, `BrandContext`, `data/brands.ts`
