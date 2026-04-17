@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=".env")
 
-if not os.getenv("ANTHROPIC_API_KEY"):
-    print("ERROR: ANTHROPIC_API_KEY not set. Create backend/.env with the key.")
+if not os.getenv("OPENAI_API_KEY"):
+    print("ERROR: OPENAI_API_KEY not set. Create backend/.env with the key.")
     sys.exit(1)
 
 from langchain_core.messages import HumanMessage
