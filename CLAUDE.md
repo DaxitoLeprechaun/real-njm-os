@@ -32,19 +32,25 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # first tim
 
 Use `.venv/bin/python3` (not `source .venv/bin/activate`) to avoid shell state issues. Always run from `backend/` so relative imports resolve correctly.
 
-Requires `backend/.env` with `ANTHROPIC_API_KEY=sk-ant-...`
+Requires `backend/.env` with `OPENAI_API_KEY=sk-...`
 
 ### Smoke test (verify graph compiles and agents load)
 ```bash
 cd backend
 .venv/bin/python3 -c "
-import os; os.environ.setdefault('ANTHROPIC_API_KEY','test')
+import os; os.environ.setdefault('OPENAI_API_KEY','test')
 from agent.njm_graph import njm_graph, ceo_graph
 from agentes.agente_ceo import nodo_ceo
 from agentes.agente_pm import nodo_pm
 print([n for n in njm_graph.get_graph().nodes])
 "
 ```
+
+### Live smoke test (real API call — Phase 2.1 end-to-end)
+```bash
+cd backend && .venv/bin/python3 test_graph.py
+```
+Invokes `njm_graph` with `brand_id="disrupt"`, skips CEO (dev fallback), runs PM with gpt-4o, checks SQLite checkpoint. Allow 30–120 s.
 
 ### Frontend (Next.js)
 ```bash
@@ -75,12 +81,12 @@ NJM OS is a monorepo: FastAPI + LangGraph backend, Next.js 14 frontend.
 
 | Module | Role |
 |---|---|
-| `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers. `load_dotenv()` **must run before any agent module is imported** — agents instantiate `ChatAnthropic` at module level. |
+| `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers. `load_dotenv()` **must run before any agent module is imported** — agents instantiate `ChatOpenAI` at module level. |
 | `api/main.py` | `POST /api/ejecutar-tarea` — invokes `njm_graph` (async via `asyncio.to_thread`). Resolves `brand_id`/`session_id` with dev fallback (see below). |
 | `api/v1_router.py` | `POST /api/v1/ingest` (file upload placeholder) + `GET /api/v1/agent/stream` (SSE) |
 | `agent/njm_graph.py` | **Single source of graphs.** Exports `njm_graph` (6-node full graph, `SqliteSaver` checkpointer on `njm_sessions.db`) and `ceo_graph` + `AgentState` (SSE streaming compat). `load_dotenv()` must precede import. |
-| `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 5 tools, agentic loop (max 10 iters). Module-level singleton `_LLM = ChatAnthropic(...)`. |
-| `agentes/agente_pm.py` | `nodo_pm` — PM node with 14 skill tools, max 12 iters, max 2 autocorrection alerts. Module-level singleton `_LLM`. |
+| `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 5 tools, agentic loop (max 10 iters). Module-level singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
+| `agentes/agente_pm.py` | `nodo_pm` — PM node with 14 skill tools, max 12 iters, max 2 autocorrection alerts. Module-level singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
 | `core/estado.py` | `NJM_OS_State` TypedDict — 23-field unified LangGraph state. `NJM_PM_State` is an alias (deprecated). |
 | `core/dev_fixtures.py` | `_LIBRO_VIVO_DISRUPT` mock + `DEV_BRAND_ID`/`DEV_SESSION_ID` constants. Only imported in dev fallback paths — never in production. |
 | `core/schemas.py` | Pydantic v2: `LibroVivo` (9 vectors), `TarjetaSugerenciaUI`, `EstadoValidacion` enum |
@@ -127,9 +133,9 @@ Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (
 - `ceo-audit` → real LangGraph streaming via `astream_events(version="v2")`, filters `on_chat_model_stream`, uses `ceo_graph` from `njm_graph.py`
 - `pm-execution`, `ceo-approve`, `ceo-reject` → hardcoded mock scripts with `asyncio.sleep` delays
 - All sequences terminate with `data: [DONE]\n\n`
-- Anthropic streaming returns `chunk.content` as either `str` or `list[dict]` — `_extract_text()` normalizes both
+- OpenAI streaming returns `chunk.content` as `str` — `_extract_text()` normalizes to str (list fallback kept for safety)
 
-**Models:** `claude-3-5-haiku-20241022` (SSE `ceo_graph`), `claude-3-5-sonnet-20241022` (both agent nodes). All `temperature=0`.
+**Models:** `gpt-4o-mini` (SSE `ceo_graph`), `gpt-4o` (both agent nodes). All `temperature=0`.
 
 **`POST /api/v1/ingest` is a placeholder** — saves files to `backend/temp_uploads/` but does not extract text, embed, or connect to `escanear_directorio_onboarding` (which reads from `~/NJM_OS/`). Phase 2.2 work.
 
