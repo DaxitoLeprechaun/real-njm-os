@@ -118,6 +118,7 @@ export default function CEOWorkspacePage({
       const msg = err instanceof Error ? err.message : "Error desconocido";
       toast.error(`Error al rechazar: ${msg}`);
       setSubmitting(false);
+      setTerminalExitMessage(undefined);
     }
   }
 
