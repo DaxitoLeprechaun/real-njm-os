@@ -27,12 +27,12 @@ export default function CEOShield({
 }: CEOShieldProps) {
   function handleApprove() {
     onApprove?.();
-    onOpenChange(false);
+    if (!submitting) onOpenChange(false);
   }
 
   function handleReject() {
     onReject?.();
-    onOpenChange(false);
+    if (!submitting) onOpenChange(false);
   }
 
   return (
@@ -111,8 +111,9 @@ export default function CEOShield({
                     "rgb(225 29 72 / 0.15)";
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background =
-                  "transparent";
+                if (!submitting)
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    "transparent";
               }}
             >
               {submitting ? "PROCESANDO..." : "APROBAR ASUMIENDO RIESGO"}
