@@ -43,6 +43,9 @@ from core.schemas import EstadoValidacion
 # but langgraph-checkpoint-sqlite 2.0.x calls conn.is_alive() in setup().
 # _thread is a threading.Thread — is_alive() exists there.
 if not hasattr(aiosqlite.Connection, "is_alive"):
+    assert hasattr(aiosqlite.Connection, "_thread"), (
+        "aiosqlite.Connection._thread gone — revisit compatibility shim in njm_graph.py"
+    )
     aiosqlite.Connection.is_alive = lambda self: self._thread.is_alive()
 
 # ══════════════════════════════════════════════════════════════════
