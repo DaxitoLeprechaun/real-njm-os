@@ -250,7 +250,7 @@ async def _sse_njm_stream(
 
     # Post-stream: check final state for interrupts / terminal states
     try:
-        snapshot = njm_graph.get_state(config)
+        snapshot = await njm_graph.aget_state(config)
         values = snapshot.values
 
         if snapshot.next:
@@ -341,7 +341,7 @@ async def get_session_state(
     config = {"configurable": {"thread_id": thread_id}}
 
     try:
-        snapshot = njm_graph.get_state(config)
+        snapshot = await njm_graph.aget_state(config)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Checkpointer error: {exc}") from exc
 
