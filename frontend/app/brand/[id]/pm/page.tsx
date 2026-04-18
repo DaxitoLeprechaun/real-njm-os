@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import SlideOver from "@/components/njm/SlideOver";
 import AgentConsole from "@/components/njm/AgentConsole";
@@ -8,6 +8,24 @@ import CEOShield from "@/components/njm/CEOShield";
 import { useAgentConsole } from "@/hooks/useAgentConsole";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+const SESSION_ID = "dev-session-1";
+
+interface TarjetaResultado {
+  id_transaccion: string;
+  estado_ejecucion: "LISTO_PARA_FIRMA" | "BLOQUEO_CEO";
+  metadata: {
+    skill_utilizada: string;
+    timestamp_generacion: string;
+  };
+  contenido_tarjeta: {
+    propuesta_principal: string;
+    framework_metodologico: string;
+    check_coherencia_adn: { aprobado: boolean; justificacion: string };
+    archivos_locales_cowork: Array<{ nombre_archivo: string; ruta_absoluta: string }>;
+    log_errores_escalamiento: string[];
+  };
+}
 
 interface Artefacto {
   id: string;
@@ -205,45 +223,40 @@ export default function PMWorkspacePage({
   params: { id: string };
 }) {
   const [activeArtefacto, setActiveArtefacto] = useState<Artefacto | null>(null);
-  const [shieldOpen, setShieldOpen] = useState(false);
-  const [shieldMessage, setShieldMessage] = useState("");
-  const [threadId, setThreadId] = useState<string | null>(null);
-  const [executing, setExecuting] = useState(false);
-
+  const [tarjeta, setTarjeta] = useState<TarjetaResultado | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [terminalExitMessage, setTerminalExitMessage] = useState<string | null>(null);
+  const prevRunningRef = useRef(false);
   const agentConsole = useAgentConsole();
+  const agentParams = { brand_id: params.id, session_id: SESSION_ID };
+  const shieldOpen = agentConsole.actionRequired?.trigger === "BLOQUEO_CEO";
+  const shieldMessage =
+    agentConsole.actionRequired?.risk_message ??
+    "El PM detectó un riesgo que requiere revisión del CEO.";
 
-  async function handleConsultarPM() {
-    setExecuting(true);
-    agentConsole.invoke("pm-execution");
-    try {
-      const res = await fetch(`${API_URL}/api/ejecutar-tarea`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          peticion: "Ejecuta la táctica de marketing más adecuada para la marca.",
-          modo: "ejecucion",
-          nombre_marca: "Disrupt",
-          thread_id: threadId ?? undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.thread_id) setThreadId(data.thread_id);
-      if (data.estado_ejecucion === "BLOQUEO_CEO") {
-        const msg =
-          data.contenido_tarjeta?.check_coherencia_adn?.justificacion ||
-          data.contenido_tarjeta?.log_errores_escalamiento?.[0] ||
-          "El CEO bloqueó la ejecución por riesgo estratégico.";
-        setShieldMessage(msg);
-        setShieldOpen(true);
-      } else if (!res.ok) {
-        toast.error("Error al consultar el PM");
-      }
-    } catch {
-      toast.error("No se pudo conectar con el backend");
-    } finally {
-      setExecuting(false);
-    }
+  function handleConsultarPM() {
+    setTarjeta(null);
+    setTerminalExitMessage(null);
+    agentConsole.invoke("ceo-audit", agentParams);
   }
+
+  useEffect(() => {
+    if (prevRunningRef.current && !agentConsole.running && !agentConsole.actionRequired) {
+      fetch(
+        `${API_URL}/api/v1/session/state?brand_id=${params.id}&session_id=${SESSION_ID}`
+      )
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.last_tarjeta) setTarjeta(data.last_tarjeta as TarjetaResultado);
+        })
+        .catch(() => {});
+    }
+    prevRunningRef.current = agentConsole.running;
+  }, [agentConsole.running, agentConsole.actionRequired, params.id]);
+
+  useEffect(() => {
+    if (agentConsole.logs.length > 0) setSubmitting(false);
+  }, [agentConsole.logs.length]);
 
   return (
     <div className="p-8 pb-28 relative">
@@ -314,22 +327,6 @@ export default function PMWorkspacePage({
         ))}
       </div>
 
-      {/* Simulate CEO Block button — dev/test helper */}
-      <div className="mt-8 flex justify-center">
-        <button
-          onClick={() => setShieldOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-mono font-semibold uppercase tracking-widest transition-all duration-150 hover:brightness-110 active:scale-[0.97]"
-          style={{
-            background: "rgb(225 29 72 / 0.1)",
-            border: "1px solid rgb(225 29 72 / 0.35)",
-            color: "rgb(251 113 133)",
-          }}
-        >
-          <span aria-hidden>🛡</span>
-          Simular Bloqueo CEO
-        </button>
-      </div>
-
       {/* SlideOver: Document Viewer */}
       <SlideOver
         open={activeArtefacto !== null}
@@ -360,18 +357,27 @@ export default function PMWorkspacePage({
         agentLabel="PM Agent"
         logs={agentConsole.logs}
         running={agentConsole.running}
+        exitMessage={terminalExitMessage ?? undefined}
       />
 
       {/* CEO Shield Modal */}
       <CEOShield
         open={shieldOpen}
-        onOpenChange={setShieldOpen}
-        riskMessage={shieldMessage || "El CEO bloqueó la ejecución por riesgo estratégico."}
+        onOpenChange={() => {}}
+        riskMessage={shieldMessage}
+        submitting={submitting}
         onApprove={() => {
-          agentConsole.invoke("ceo-approve");
+          setSubmitting(true);
+          agentConsole.resume("APPROVED", agentParams).then(() =>
+            agentConsole.invoke("ceo-audit", agentParams)
+          );
         }}
         onReject={() => {
-          agentConsole.invoke("ceo-reject");
+          setSubmitting(true);
+          agentConsole.resume("REJECTED", agentParams).then(() => {
+            setTerminalExitMessage("CEO rechazó la ejecución.");
+            agentConsole.invoke("ceo-reject", agentParams);
+          });
         }}
       />
 
@@ -379,7 +385,7 @@ export default function PMWorkspacePage({
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
         <button
           onClick={handleConsultarPM}
-          disabled={executing}
+          disabled={agentConsole.running}
           className="pointer-events-auto flex items-center gap-2.5 px-7 py-3.5 rounded-full font-semibold text-sm text-white transition-all duration-200 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 disabled:cursor-not-allowed"
           style={{
             background: "hsl(var(--pm-accent))",
