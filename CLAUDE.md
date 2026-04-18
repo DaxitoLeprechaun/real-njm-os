@@ -234,8 +234,13 @@ frontend/app/
 **Key components:**
 - `components/njm/` — business components: `Sidebar`, `BrandCard`, `VectorCard`, `SlideOver`, `AgentConsole`, `CEOShield`
 - `components/ui/` — Shadcn UI primitives — **do not modify**. Uses `@base-ui/react` internally (not standard Radix); `Dialog` controlled mode: `<Dialog open={bool} onOpenChange={setFn}>`.
-- `hooks/useAgentConsole` — `invoke(sequenceId, params?)` opens SSE with optional `{brand_id, session_id}`; exposes `open`, `logs`, `running`, `close`, `actionRequired` (set on `action_required` JSON event), `resume(answers, params)` (calls `POST /api/v1/agent/resume`). Handles both JSON events (new `ceo-audit`) and legacy plain-text (mock sequences).
-- `CEOShield` — brutalist Dialog modal (2px rose-600 border). `onApprove` → `invoke("ceo-approve")`, `onReject` → `invoke("ceo-reject")`.
+- `hooks/useAgentConsole` — `invoke(sequenceId, params?)` opens SSE with optional `{brand_id, session_id}`; exposes `open`, `logs`, `running`, `close`, `actionRequired: ActionRequiredEvent | null` (set on `action_required` JSON event, cleared by next `invoke()` call), `resume(answers, params)` (calls `POST /api/v1/agent/resume`). Handles both JSON events (new `ceo-audit`) and legacy plain-text (mock sequences). Hook is complete — do not modify.
+- `CEOShield` — brutalist Dialog modal (2px rose-600 border). Accepts `submitting?: boolean` to disable buttons during network I/O. Approve path: `resume("APPROVED", params)` → `invoke("ceo-audit", params)`. Reject path: `resume("REJECTED", params)` → `invoke("ceo-reject", params)`. Controlled via `shieldOpen = actionRequired?.trigger === "BLOQUEO_CEO"` — pass `onOpenChange={() => {}}` to prevent Escape-close.
+- `AgentConsole` — accepts optional `exitMessage?: string` to override the "Process exited with code 0" footer (shown in rose-600 bold after rejection).
+
+**Concurrency pattern (CEO Shield):** After `resume()` + `invoke()`, use `useEffect` watching `agentConsole.logs.length > 0` to release the `submitting` lock — not the network promise. This ensures the shield stays blocked until the first SSE log proves the stream restarted ("Optimistic UI Inversion").
+
+**Frontend testing:** No Jest/RTL infrastructure. TypeScript strict mode is the primary safety net. Integration tests deferred to Phase 2.6.
 
 **Mock data state:** `ceo/page.tsx` (`MOCK_VECTORES`) and `pm/page.tsx` (`MOCK_ARTEFACTOS`) render hardcoded data. Neither connected to real backend state. "Consultar PM" invokes mock `pm-execution` SSE script.
 
@@ -255,10 +260,12 @@ When Tailwind JIT can't resolve dynamic HSL strings, use CSS variables: `hsl(var
 **Design constraints:** Never use chat bubble interfaces. `nature-bg.jpg` lives in `frontend/public/`.
 
 **Not yet built (see ARCHITECTURE_ROADMAP_PHASE2.md):**
-- Phase 2.3 partial: `interrupt()` in `human_in_loop_node` (stub auto-completes), DayCeroView wizard in CEO Workspace, `actionRequired` from hook not yet consumed in any page UI
-- Phase 2.4: PM SSE streaming real (eliminate `pm-execution` mock), connect "Consultar PM" button to real graph
-- Phase 2.5: CEOShield wired to real `BLOQUEO_CEO` events (currently manual button)
-- Phase 2.6: retry/tenacity, structured PM output, `Last-Event-ID` SSE reconnect, CORS env var
+- Phase 2.3 partial: `interrupt()` in `human_in_loop_node` (stub auto-completes), DayCeroView wizard in CEO Workspace
+- Phase 2.4 — CEO Shield UI **[implementation plan written]**: Wire `CEOShield` + `AgentConsole` into `ceo/page.tsx` to react to `BLOQUEO_CEO`. Plan: `docs/superpowers/plans/2026-04-18-phase-2-4-ceo-shield-ui.md`. Three files: `CEOShield.tsx` (submitting prop), `AgentConsole.tsx` (exitMessage prop), `ceo/page.tsx` (wiring).
+- Phase 2.5: PM SSE streaming real (eliminate `pm-execution` mock), connect "Consultar PM" to real graph
+- Phase 2.6: retry/tenacity, structured PM output, `Last-Event-ID` SSE reconnect, CORS env var, Jest/RTL frontend test infrastructure
 - Frontend contexts: `AgencyContext`, `BrandContext`, `data/brands.ts`
 - Graph `ingest` node wired to real ChromaDB pipeline (currently passthrough stub)
 - `MOCK_VECTORES` (`ceo/page.tsx`) and `MOCK_ARTEFACTOS` (`pm/page.tsx`) still hardcoded — not yet connected to real backend state
+
+**Planning artifacts:** `docs/superpowers/specs/` holds approved design specs; `docs/superpowers/plans/` holds step-by-step implementation plans. Read the relevant plan before implementing any pending phase.
