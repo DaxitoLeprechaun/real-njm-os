@@ -108,9 +108,9 @@ NJM OS is a monorepo: FastAPI + LangGraph backend, Next.js 14 frontend.
 | Module | Role |
 |---|---|
 | `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers. `load_dotenv()` **must run before any agent module is imported** — agents instantiate `ChatOpenAI` at module level. |
-| `api/main.py` | `POST /api/ejecutar-tarea` — invokes `njm_graph` (async via `asyncio.to_thread`). Resolves `brand_id`/`session_id` with dev fallback (see below). |
+| `api/main.py` | `POST /api/ejecutar-tarea` — invokes `njm_graph` via `await njm_graph.ainvoke(...)`. Resolves `brand_id`/`session_id` with dev fallback (see below). |
 | `api/v1_router.py` | `POST /api/v1/ingest` + `GET /api/v1/agent/stream` (SSE, unified via `njm_graph`) + `GET /api/v1/session/state` (checkpointer hydration) + `POST /api/v1/agent/resume` (graph resumption after interrupt) |
-| `agent/njm_graph.py` | **Single source of graphs.** Exports `njm_graph` (6-node full graph, `SqliteSaver` checkpointer on `njm_sessions.db`) and `ceo_graph` + `AgentState`. `load_dotenv()` must precede import. |
+| `agent/njm_graph.py` | **Single source of graphs.** Exports `njm_graph` (6-node full graph, `AsyncSqliteSaver` checkpointer on `njm_sessions.db`) and `ceo_graph` + `AgentState`. `load_dotenv()` must precede import. Initialized via `asyncio.run()` at module load — safe because import happens before uvicorn starts its loop. |
 | `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 6 tools (5 original + `buscar_contexto_marca`), agentic loop (max 10 iters). Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
 | `agentes/agente_pm.py` | `nodo_pm` — PM node with 15 tools (14 PM skills + `buscar_contexto_marca`), max 12 iters. Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
 | `core/estado.py` | `NJM_OS_State` TypedDict — 23-field unified LangGraph state. `NJM_PM_State` is an alias (deprecated). |
@@ -167,7 +167,7 @@ Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (
 
 **CEO skip guard:** `ceo_auditor_node` returns `{}` immediately if `state["audit_status"] == "COMPLETE"`.
 
-**Checkpointer:** `SqliteSaver` on `./njm_sessions.db`. `thread_id = f"{brand_id}:{session_id}"`. Pass `{"configurable": {"thread_id": thread_id}}` to every `invoke`/`astream_events` call.
+**Checkpointer:** `AsyncSqliteSaver` on `./njm_sessions.db`. `thread_id = f"{brand_id}:{session_id}"`. Pass `{"configurable": {"thread_id": thread_id}}` to every `ainvoke`/`astream_events`/`aget_state` call. Never use the sync `invoke`/`get_state` — they raise `NotImplementedError` with an async checkpointer.
 
 **Dev fallback** (`api/main.py`): if `brand_id` is empty → `"disrupt"`, `session_id` empty → `"dev-session-1"`. When `brand_id == "disrupt"`, injects `_LIBRO_VIVO_DISRUPT` and sets `audit_status="COMPLETE"` so CEO is skipped and PM runs directly.
 
@@ -180,7 +180,7 @@ Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (
 **SSE endpoint (`GET /api/v1/agent/stream?sequenceId=...&brand_id=...&session_id=...`):**
 - `ceo-audit` → streams full `njm_graph` via `astream_events(version="v2")`. Emits JSON events: `{"type":"log","text":"..."}`, `{"type":"action_required","trigger":"BLOQUEO_CEO"|"GAP_DETECTED",...}`, `{"type":"done"}`. Dev fallback: `brand_id="disrupt"` injects `_LIBRO_VIVO_DISRUPT` + skips CEO.
 - `pm-execution`, `ceo-approve`, `ceo-reject` → hardcoded mock scripts (plain-text, legacy `[DONE]` sentinel — Phase 2.4 will wire real PM streaming)
-- Post-stream: calls `njm_graph.get_state()` to detect `BLOQUEO_CEO` or graph interrupt (`snapshot.next` truthy) and emit `action_required` event before `done`.
+- Post-stream: calls `await njm_graph.aget_state()` to detect `BLOQUEO_CEO` or graph interrupt (`snapshot.next` truthy) and emit `action_required` event before `done`.
 
 **Session endpoints (Phase 2.3):**
 - `GET /api/v1/session/state?brand_id=&session_id=` → returns `{audit_status, interview_questions, last_tarjeta, documentos_count, next_interrupt}` from checkpointer
