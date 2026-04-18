@@ -38,14 +38,14 @@ def test_agent_stream_accepts_brand_id_and_session_id(monkeypatch):
 
     monkeypatch.setattr(graph_mod.njm_graph, "astream_events", fake_astream_events)
 
-    def fake_get_state(config):
+    async def fake_aget_state(config):
         class _Snap:
             values = {"estado_validacion": "LISTO_PARA_FIRMA", "audit_status": "COMPLETE"}
             next = []
             tasks = []
         return _Snap()
 
-    monkeypatch.setattr(graph_mod.njm_graph, "get_state", fake_get_state)
+    monkeypatch.setattr(graph_mod.njm_graph, "aget_state", fake_aget_state)
 
     from main import app
     from fastapi.testclient import TestClient
@@ -68,14 +68,14 @@ def test_agent_stream_emits_done_event(monkeypatch):
 
     monkeypatch.setattr(graph_mod.njm_graph, "astream_events", fake_astream_events)
 
-    def fake_get_state(config):
+    async def fake_aget_state(config):
         class _Snap:
             values = {"estado_validacion": "LISTO_PARA_FIRMA", "audit_status": "COMPLETE"}
             next = []
             tasks = []
         return _Snap()
 
-    monkeypatch.setattr(graph_mod.njm_graph, "get_state", fake_get_state)
+    monkeypatch.setattr(graph_mod.njm_graph, "aget_state", fake_aget_state)
 
     from main import app
     from fastapi.testclient import TestClient
@@ -99,7 +99,7 @@ def test_agent_stream_emits_action_required_on_bloqueo_ceo(monkeypatch):
 
     monkeypatch.setattr(graph_mod.njm_graph, "astream_events", fake_astream_events)
 
-    def fake_get_state(config):
+    async def fake_aget_state(config):
         class _Snap:
             values = {
                 "estado_validacion": "BLOQUEO_CEO",
@@ -110,7 +110,7 @@ def test_agent_stream_emits_action_required_on_bloqueo_ceo(monkeypatch):
             tasks = []
         return _Snap()
 
-    monkeypatch.setattr(graph_mod.njm_graph, "get_state", fake_get_state)
+    monkeypatch.setattr(graph_mod.njm_graph, "aget_state", fake_aget_state)
 
     from main import app
     from fastapi.testclient import TestClient
@@ -136,7 +136,7 @@ def test_agent_stream_emits_action_required_on_gap_detected(monkeypatch):
 
     monkeypatch.setattr(graph_mod.njm_graph, "astream_events", fake_astream_events)
 
-    def fake_get_state(config):
+    async def fake_aget_state(config):
         class _Snap:
             values = {
                 "audit_status": "GAP_DETECTED",
@@ -146,7 +146,7 @@ def test_agent_stream_emits_action_required_on_gap_detected(monkeypatch):
             tasks = []
         return _Snap()
 
-    monkeypatch.setattr(graph_mod.njm_graph, "get_state", fake_get_state)
+    monkeypatch.setattr(graph_mod.njm_graph, "aget_state", fake_aget_state)
 
     from main import app
     from fastapi.testclient import TestClient
@@ -167,7 +167,7 @@ def test_session_state_endpoint_returns_snapshot(monkeypatch):
     """GET /api/v1/session/state must return current graph state from checkpointer."""
     from agent import njm_graph as graph_mod
 
-    def fake_get_state(config):
+    async def fake_aget_state(config):
         class _Snap:
             values = {
                 "audit_status": "COMPLETE",
@@ -179,7 +179,7 @@ def test_session_state_endpoint_returns_snapshot(monkeypatch):
             tasks = []
         return _Snap()
 
-    monkeypatch.setattr(graph_mod.njm_graph, "get_state", fake_get_state)
+    monkeypatch.setattr(graph_mod.njm_graph, "aget_state", fake_aget_state)
 
     from main import app
     from fastapi.testclient import TestClient
