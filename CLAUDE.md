@@ -47,14 +47,17 @@ Tests that call `upsert_chunks` or `query_brand` make real OpenAI embedding API 
 ```bash
 cd backend
 .venv/bin/python3 -c "
-import os; os.environ.setdefault('OPENAI_API_KEY','test')
-from agent.njm_graph import njm_graph, ceo_graph
+import os, asyncio; os.environ.setdefault('OPENAI_API_KEY','test')
+from agent.njm_graph import init_graph, ceo_graph
 from agentes.agente_ceo import nodo_ceo, CEO_TOOLS
 from agentes.agente_pm import nodo_pm
+asyncio.run(init_graph())
+from agent.njm_graph import njm_graph
 print([n for n in njm_graph.get_graph().nodes])
 print('CEO tools:', [t.name for t in CEO_TOOLS])
 "
 ```
+**Note:** `njm_graph` is `None` at import time — it is initialized by `await init_graph()` inside the FastAPI lifespan (or `asyncio.run(init_graph())` for scripts/tests). Do not import and use `njm_graph` without first calling `init_graph()`.
 
 ### Live smoke test (real API call — Phase 2.1 end-to-end)
 ```bash
@@ -107,10 +110,10 @@ NJM OS is a monorepo: FastAPI + LangGraph backend, Next.js 14 frontend.
 
 | Module | Role |
 |---|---|
-| `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers. `load_dotenv()` **must run before any agent module is imported** — agents instantiate `ChatOpenAI` at module level. |
-| `api/main.py` | `POST /api/ejecutar-tarea` — invokes `njm_graph` via `await njm_graph.ainvoke(...)`. Resolves `brand_id`/`session_id` with dev fallback (see below). |
-| `api/v1_router.py` | `POST /api/v1/ingest` + `GET /api/v1/agent/stream` (SSE, unified via `njm_graph`) + `GET /api/v1/session/state` (checkpointer hydration) + `POST /api/v1/agent/resume` (graph resumption after interrupt) |
-| `agent/njm_graph.py` | **Single source of graphs.** Exports `njm_graph` (6-node full graph, `AsyncSqliteSaver` checkpointer on `njm_sessions.db`) and `ceo_graph` + `AgentState`. `load_dotenv()` must precede import. Initialized via `asyncio.run()` at module load — safe because import happens before uvicorn starts its loop. |
+| `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers. Has `@asynccontextmanager lifespan` that calls `await init_graph()` on startup and closes the aiosqlite connection on shutdown. `load_dotenv()` **must run before any agent module is imported** — agents instantiate `ChatOpenAI` at module level. |
+| `api/main.py` | `POST /api/ejecutar-tarea` — invokes `njm_graph` via `await njm_graph.ainvoke(...)`. Resolves `brand_id`/`session_id` with dev fallback (see below). Imports `njm_graph` lazily inside the function body (not at module level). |
+| `api/v1_router.py` | `POST /api/v1/ingest` + `GET /api/v1/agent/stream` (SSE, unified via `njm_graph`) + `GET /api/v1/session/state` (checkpointer hydration) + `POST /api/v1/agent/resume` (graph resumption after interrupt). All `njm_graph` imports are lazy (inside function bodies). |
+| `agent/njm_graph.py` | **Single source of graphs.** Exports `njm_graph` (starts as `None`), `init_graph()` async coroutine, `ceo_graph`, and `AgentState`. `njm_graph` is set by `await init_graph()` — called from lifespan on startup. Also contains `aiosqlite.Connection.is_alive` compatibility shim (see Dependency Pitfalls below). |
 | `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 6 tools (5 original + `buscar_contexto_marca`), agentic loop (max 10 iters). Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
 | `agentes/agente_pm.py` | `nodo_pm` — PM node with 15 tools (14 PM skills + `buscar_contexto_marca`), max 12 iters. Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
 | `core/estado.py` | `NJM_OS_State` TypedDict — 23-field unified LangGraph state. `NJM_PM_State` is an alias (deprecated). |
@@ -167,6 +170,10 @@ Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (
 
 **CEO skip guard:** `ceo_auditor_node` returns `{}` immediately if `state["audit_status"] == "COMPLETE"`.
 
+**Graph initialization:** `njm_graph` is `None` at import time. `await init_graph()` builds the graph and sets the module global — called once from the FastAPI lifespan in `main.py`. All callers import `njm_graph` lazily inside their function bodies (`from agent.njm_graph import njm_graph  # noqa: PLC0415`) to avoid capturing `None` at import time. The `init_graph()` coroutine is idempotent (guarded by `asyncio.Lock`) — safe to call multiple times.
+
+**Test initialization:** `tests/conftest.py` has a session-scoped autouse fixture that calls `asyncio.run(init_graph())` before any test runs. This ensures `njm_graph` is a real object when tests monkeypatch its methods.
+
 **Checkpointer:** `AsyncSqliteSaver` on `./njm_sessions.db`. `thread_id = f"{brand_id}:{session_id}"`. Pass `{"configurable": {"thread_id": thread_id}}` to every `ainvoke`/`astream_events`/`aget_state` call. Never use the sync `invoke`/`get_state` — they raise `NotImplementedError` with an async checkpointer.
 
 **Dev fallback** (`api/main.py`): if `brand_id` is empty → `"disrupt"`, `session_id` empty → `"dev-session-1"`. When `brand_id == "disrupt"`, injects `_LIBRO_VIVO_DISRUPT` and sets `audit_status="COMPLETE"` so CEO is skipped and PM runs directly.
@@ -197,6 +204,15 @@ NJM_OS_State.libro_vivo (9 vectors, CEO-validated JSON)
   → PM agentic loop with 15 tools (14 skills + buscar_contexto_marca)
   → payload_tarjeta_sugerencia (TarjetaSugerenciaUI JSON → Next.js)
 ```
+
+### Dependency Pitfalls
+
+**aiosqlite / langgraph-checkpoint-sqlite incompatibility:** `langgraph-checkpoint-sqlite 2.0.x` calls `conn.is_alive()` inside `AsyncSqliteSaver.setup()`. `aiosqlite 0.22+` removed `is_alive()` from `Connection` (it's now on `Connection._thread`). A compatibility shim in `agent/njm_graph.py` patches the missing method at import time:
+```python
+if not hasattr(aiosqlite.Connection, "is_alive"):
+    aiosqlite.Connection.is_alive = lambda self: self._thread.is_alive()
+```
+If this assertion fires on startup, the aiosqlite internal API changed — revisit the shim. Do not remove it without checking the installed versions of both packages.
 
 ### Frontend: Next.js 14 App Router
 
