@@ -39,6 +39,12 @@ from agentes.agente_pm import nodo_pm
 from core.estado import NJM_OS_State
 from core.schemas import EstadoValidacion
 
+# Compatibility shim: aiosqlite 0.22+ removed is_alive() from Connection,
+# but langgraph-checkpoint-sqlite 2.0.x calls conn.is_alive() in setup().
+# _thread is a threading.Thread — is_alive() exists there.
+if not hasattr(aiosqlite.Connection, "is_alive"):
+    aiosqlite.Connection.is_alive = lambda self: self._thread.is_alive()
+
 # ══════════════════════════════════════════════════════════════════
 # NODOS STUB (Phase 2.1)
 # ══════════════════════════════════════════════════════════════════
