@@ -14,6 +14,7 @@ export interface CEOShieldProps {
   riskMessage?: string;
   onApprove?: () => void;
   onReject?: () => void;
+  submitting?: boolean;
 }
 
 export default function CEOShield({
@@ -22,6 +23,7 @@ export default function CEOShield({
   riskMessage = "El presupuesto propuesto excede el límite del Vector 5.",
   onApprove,
   onReject,
+  submitting = false,
 }: CEOShieldProps) {
   function handleApprove() {
     onApprove?.();
@@ -96,28 +98,31 @@ export default function CEOShield({
             {/* Primary: Approve — brutalist rose outline */}
             <button
               onClick={handleApprove}
-              className="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold uppercase tracking-widest transition-all duration-150 active:scale-[0.97]"
+              disabled={submitting}
+              className="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold uppercase tracking-widest transition-all duration-150 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
                 background: "transparent",
                 border: "1.5px solid rgb(225 29 72)",
                 color: "rgb(251 113 133)", // rose-400
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background =
-                  "rgb(225 29 72 / 0.15)";
+                if (!submitting)
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    "rgb(225 29 72 / 0.15)";
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLButtonElement).style.background =
                   "transparent";
               }}
             >
-              APROBAR ASUMIENDO RIESGO
+              {submitting ? "PROCESANDO..." : "APROBAR ASUMIENDO RIESGO"}
             </button>
 
             {/* Secondary: Reject — solid light */}
             <button
               onClick={handleReject}
-              className="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold uppercase tracking-widest bg-slate-100 text-slate-900 hover:bg-white transition-all duration-150 active:scale-[0.97]"
+              disabled={submitting}
+              className="flex-1 px-4 py-2.5 rounded-lg text-sm font-bold uppercase tracking-widest bg-slate-100 text-slate-900 hover:bg-white transition-all duration-150 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
             >
               RECHAZAR Y RE-PLANIFICAR
             </button>
