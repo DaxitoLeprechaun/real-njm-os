@@ -21,14 +21,15 @@ SSE compat: también exporta AgentState + ceo_graph para /api/v1/agent/stream.
 
 from __future__ import annotations
 
-import sqlite3
+import asyncio
+import aiosqlite
 from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, Optional
 from uuid import uuid4
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
@@ -162,7 +163,7 @@ def _route_after_ceo_review(state: NJM_OS_State) -> str:
 # ══════════════════════════════════════════════════════════════════
 
 
-def _build_njm_graph() -> Any:
+async def _build_njm_graph() -> Any:
     builder = StateGraph(NJM_OS_State)
 
     builder.add_node("ingest", ingest_node)
@@ -181,7 +182,6 @@ def _build_njm_graph() -> Any:
         {"pm_execution": "pm_execution", "human_in_loop": "human_in_loop", "output": "output"},
     )
 
-    # human_in_loop stub re-entra al CEO (que hará skip por audit_status=COMPLETE)
     builder.add_edge("human_in_loop", "ceo_auditor")
 
     builder.add_conditional_edges(
@@ -198,12 +198,12 @@ def _build_njm_graph() -> Any:
 
     builder.add_edge("output", END)
 
-    conn = sqlite3.connect("njm_sessions.db", check_same_thread=False)
-    checkpointer = SqliteSaver(conn)
+    conn = await aiosqlite.connect("njm_sessions.db")
+    checkpointer = AsyncSqliteSaver(conn)
     return builder.compile(checkpointer=checkpointer)
 
 
-njm_graph = _build_njm_graph()
+njm_graph = asyncio.run(_build_njm_graph())
 
 
 # ══════════════════════════════════════════════════════════════════
