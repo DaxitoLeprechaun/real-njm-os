@@ -12,10 +12,11 @@ from api.v1_router import router as v1_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from agent.njm_graph import init_graph, njm_graph
+    from agent.njm_graph import init_graph
     await init_graph()
     yield
-    # Teardown: close aiosqlite connection cleanly
+    # Teardown: re-import after init so we get the initialized graph, not None
+    from agent.njm_graph import njm_graph
     if njm_graph is not None and hasattr(njm_graph.checkpointer, "conn"):
         await njm_graph.checkpointer.conn.close()
 
