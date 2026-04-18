@@ -258,6 +258,32 @@ export default function PMWorkspacePage({
     if (agentConsole.logs.length > 0) setSubmitting(false);
   }, [agentConsole.logs.length]);
 
+  function tarjetaToArtefacto(t: TarjetaResultado): Artefacto {
+    const date = new Date(t.metadata.timestamp_generacion).toLocaleDateString("es-MX");
+    const files =
+      t.contenido_tarjeta.archivos_locales_cowork
+        .map((f) => `- ${f.nombre_archivo}`)
+        .join("\n") || "— sin archivos adjuntos —";
+    const errors =
+      t.contenido_tarjeta.log_errores_escalamiento.length
+        ? "\n\n## Errores de escalamiento\n" +
+          t.contenido_tarjeta.log_errores_escalamiento.map((e) => `- ${e}`).join("\n")
+        : "";
+    return {
+      id: t.id_transaccion,
+      titulo: t.contenido_tarjeta.propuesta_principal,
+      framework: t.contenido_tarjeta.framework_metodologico,
+      tipo: t.estado_ejecucion === "LISTO_PARA_FIRMA" ? "Resultado PM" : "Bloqueado CEO",
+      fecha: date,
+      contenidoMd:
+        `# ${t.contenido_tarjeta.propuesta_principal}\n\n` +
+        `**Framework:** ${t.contenido_tarjeta.framework_metodologico}\n\n` +
+        `**Coherencia ADN:** ${t.contenido_tarjeta.check_coherencia_adn.aprobado ? "✓" : "✗"} ${t.contenido_tarjeta.check_coherencia_adn.justificacion}\n\n` +
+        `## Archivos entregables\n${files}` +
+        errors,
+    };
+  }
+
   return (
     <div className="p-8 pb-28 relative">
       {/* Header */}
