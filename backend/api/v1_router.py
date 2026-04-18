@@ -121,6 +121,10 @@ _DEFAULT_SCRIPT = [
     "[✓] Secuencia completada.",
 ]
 
+# Set True to short-circuit ceo-audit with a hardcoded BLOQUEO_CEO sequence
+# for frontend testing without a live OpenAI key.
+_TEST_BLOQUEO_CEO = False
+
 _DEFAULT_BRAND_CONTEXT = (
     "Marca: Disrupt Agency — Agencia de marketing B2B enfocada en SaaS latinoamericano. "
     "Etapa: Serie A. CAC objetivo: $120. LTV objetivo: $2,400. "
