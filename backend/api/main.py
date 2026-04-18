@@ -9,7 +9,7 @@ Flujo:
     → Resuelve brand_id / session_id (dev fallback si vienen vacíos)
     → Construye thread_id = f"{brand_id}:{session_id}"
     → Inicializa NJM_OS_State con dev fixtures si brand_id == "disrupt"
-    → Invoca njm_graph (async via asyncio.to_thread)
+    → Invoca njm_graph (async via ainvoke)
     → Devuelve payload_tarjeta_sugerencia (TarjetaSugerenciaUI JSON)
 
 Dev fallback (Phase 2.1):
@@ -24,7 +24,6 @@ Phase 2.3: el frontend pasará brand_id y session_id reales;
 
 from __future__ import annotations
 
-import asyncio
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -189,9 +188,7 @@ async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
 
     # ── Ejecutar grafo con checkpointer ──────────────────────────
     try:
-        estado_final: Dict[str, Any] = await asyncio.to_thread(
-            njm_graph.invoke, estado_inicial, config
-        )
+        estado_final: Dict[str, Any] = await njm_graph.ainvoke(estado_inicial, config)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
