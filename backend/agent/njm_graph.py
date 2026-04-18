@@ -13,7 +13,7 @@ Topología completa (6 nodos):
 
 Routing condicional basado en audit_status y estado_validacion del NJM_OS_State.
 
-Checkpointer: SqliteSaver (dev) en ./njm_sessions.db
+Checkpointer: AsyncSqliteSaver en ./njm_sessions.db
   thread_id = f"{brand_id}:{session_id}"
 
 SSE compat: también exporta AgentState + ceo_graph para /api/v1/agent/stream.
@@ -204,14 +204,18 @@ async def _build_njm_graph() -> Any:
 
 
 njm_graph = None  # initialized by init_graph() inside Uvicorn's event loop
+_init_lock: asyncio.Lock | None = None
 
 
 async def init_graph() -> None:
     """Call once from FastAPI lifespan (or test fixtures) to build njm_graph."""
-    global njm_graph
-    if njm_graph is not None:
-        return
-    njm_graph = await _build_njm_graph()
+    global njm_graph, _init_lock
+    if _init_lock is None:
+        _init_lock = asyncio.Lock()
+    async with _init_lock:
+        if njm_graph is not None:
+            return
+        njm_graph = await _build_njm_graph()
 
 
 # ══════════════════════════════════════════════════════════════════
