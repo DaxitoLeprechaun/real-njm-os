@@ -203,7 +203,15 @@ async def _build_njm_graph() -> Any:
     return builder.compile(checkpointer=checkpointer)
 
 
-njm_graph = asyncio.run(_build_njm_graph())
+njm_graph = None  # initialized by init_graph() inside Uvicorn's event loop
+
+
+async def init_graph() -> None:
+    """Call once from FastAPI lifespan (or test fixtures) to build njm_graph."""
+    global njm_graph
+    if njm_graph is not None:
+        return
+    njm_graph = await _build_njm_graph()
 
 
 # ══════════════════════════════════════════════════════════════════
