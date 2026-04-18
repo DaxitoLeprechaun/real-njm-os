@@ -8,8 +8,8 @@ export interface AgentConsoleProps {
   onClose: () => void;
   agentLabel: string;
   logs: string[];
-  /** When true the simulation is still running (shows blinking cursor) */
   running: boolean;
+  exitMessage?: string;
 }
 
 export default function AgentConsole({
@@ -18,6 +18,7 @@ export default function AgentConsole({
   agentLabel,
   logs,
   running,
+  exitMessage,
 }: AgentConsoleProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -96,13 +97,17 @@ export default function AgentConsole({
 
         {!running && logs.length > 0 && (
           <div
-            className="text-xs font-mono text-slate-600 mt-2 pt-2"
+            className={`text-xs font-mono mt-2 pt-2 ${
+              exitMessage
+                ? "text-rose-600 font-semibold tracking-wide"
+                : "text-slate-600"
+            }`}
             style={{
               fontFamily: "'Fira Code', monospace",
               borderTop: "1px solid rgb(30 41 59)",
             }}
           >
-            Process exited with code 0
+            {exitMessage ?? "Process exited with code 0"}
           </div>
         )}
 
