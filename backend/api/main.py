@@ -33,7 +33,6 @@ from fastapi import APIRouter, HTTPException, status
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
-from agent.njm_graph import njm_graph
 from core.schemas import EstadoValidacion
 
 router = APIRouter()
@@ -187,6 +186,7 @@ async def ejecutar_tarea(req: EjecutarTareaRequest) -> Dict[str, Any]:
     }
 
     # ── Ejecutar grafo con checkpointer ──────────────────────────
+    from agent.njm_graph import njm_graph  # noqa: PLC0415
     try:
         estado_final: Dict[str, Any] = await njm_graph.ainvoke(estado_inicial, config)
     except Exception as exc:
