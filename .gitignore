@@ -20,3 +20,6 @@ dist/
 # Uploads
 backend/temp_uploads/
 backend/chroma_db/
+
+# Git worktrees
+.worktrees/
