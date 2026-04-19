@@ -23,6 +23,12 @@ const PRIORIDAD_BADGE: Record<Tarea["prioridad"], string> = {
   BAJA:  "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
 };
 
+const ESTADO_CYCLE: Record<Tarea["estado"], Tarea["estado"]> = {
+  BACKLOG: "EN_PROGRESO",
+  EN_PROGRESO: "DONE",
+  DONE: "BACKLOG",
+};
+
 interface TarjetaResultado {
   id_transaccion: string;
   estado_ejecucion: "LISTO_PARA_FIRMA" | "BLOQUEO_CEO";
@@ -225,6 +231,9 @@ export default function PMWorkspacePage({
   const prevRunningRef = useRef(false);
   const agentConsole = useAgentConsole();
   const { tasks } = agentConsole;
+  const [localTasks, setLocalTasks] = useState<Tarea[]>([]);
+  const [patchingTaskId, setPatchingTaskId] = useState<string | null>(null);
+  const [humanTouchedIds, setHumanTouchedIds] = useState<Set<string>>(new Set());
   const agentParams = { brand_id: params.id, session_id: SESSION_ID };
   const shieldOpen = agentConsole.actionRequired?.trigger === "BLOQUEO_CEO";
   const shieldMessage =
@@ -261,6 +270,61 @@ export default function PMWorkspacePage({
   useEffect(() => {
     if (agentConsole.logs.length > 0) setSubmitting(false);
   }, [agentConsole.logs.length]);
+
+  useEffect(() => {
+    if (tasks.length === 0) return;
+    setLocalTasks((prev) => {
+      const overrideMap = Object.fromEntries(prev.map((t) => [t.id, t.estado]));
+      return tasks.map((t) => ({ ...t, estado: overrideMap[t.id] ?? t.estado }));
+    });
+  }, [tasks]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(
+      `${API_URL}/api/v1/session/state?brand_id=${params.id}&session_id=${SESSION_ID}`,
+      { signal: controller.signal }
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data.tasks) && data.tasks.length > 0) {
+          setLocalTasks(data.tasks as Tarea[]);
+        }
+        if (data.last_tarjeta) setTarjeta(data.last_tarjeta as TarjetaResultado);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleEstadoChange(tareaId: string, currentEstado: Tarea["estado"]) {
+    const nextEstado = ESTADO_CYCLE[currentEstado];
+    setLocalTasks((prev) =>
+      prev.map((t) => (t.id === tareaId ? { ...t, estado: nextEstado } : t))
+    );
+    setHumanTouchedIds((prev) => new Set(prev).add(tareaId));
+    setPatchingTaskId(tareaId);
+    fetch(`${API_URL}/api/v1/tasks/${tareaId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        brand_id: params.id,
+        session_id: SESSION_ID,
+        estado: nextEstado,
+      }),
+    })
+      .catch(() => {
+        setLocalTasks((prev) =>
+          prev.map((t) => (t.id === tareaId ? { ...t, estado: currentEstado } : t))
+        );
+        setHumanTouchedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(tareaId);
+          return next;
+        });
+      })
+      .finally(() => setPatchingTaskId(null));
+  }
 
   function tarjetaToArtefacto(t: TarjetaResultado): Artefacto {
     const rawDate = new Date(t.metadata.timestamp_generacion);
@@ -425,14 +489,14 @@ export default function PMWorkspacePage({
           >
             Tablero Táctico
           </p>
-          {tasks.length > 0 && (
+          {localTasks.length > 0 && (
             <span className="text-[10px] px-2 py-0.5 rounded-full font-mono text-pm/60 border border-pm/20">
-              {tasks.length} tarea{tasks.length !== 1 ? "s" : ""}
+              {localTasks.length} tarea{localTasks.length !== 1 ? "s" : ""}
             </span>
           )}
         </div>
 
-        {tasks.length === 0 ? (
+        {localTasks.length === 0 ? (
           <div className="glass-subtle rounded-xl p-6 border border-white/[0.04] flex items-center gap-3">
             <span className="text-muted-foreground/30 text-lg" aria-hidden>⏳</span>
             <p className="text-sm text-muted-foreground/40 font-mono">
@@ -442,7 +506,7 @@ export default function PMWorkspacePage({
         ) : (
           <div className="grid grid-cols-3 gap-4">
             {KANBAN_COLUMNS.map(({ estado, label }) => {
-              const col = tasks.filter((t) => t.estado === estado);
+              const col = localTasks.filter((t) => t.estado === estado);
               return (
                 <div key={estado} className="flex flex-col gap-2">
                   <div className="flex items-center justify-between px-1 mb-1">
@@ -460,9 +524,15 @@ export default function PMWorkspacePage({
                       </div>
                     ) : (
                       col.map((tarea) => (
-                        <div
+                        <button
                           key={tarea.id}
-                          className="glass-subtle rounded-lg p-3 border border-white/[0.06] flex flex-col gap-1.5"
+                          onClick={() => handleEstadoChange(tarea.id, tarea.estado)}
+                          disabled={patchingTaskId === tarea.id}
+                          className={`glass-subtle rounded-lg p-3 flex flex-col gap-1.5 text-left w-full cursor-pointer hover:border-white/[0.14] active:scale-[0.98] transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed border ${
+                            humanTouchedIds.has(tarea.id)
+                              ? "border-l-2 border-amber-500/40 border-r border-r-white/[0.06] border-t border-t-white/[0.06] border-b border-b-white/[0.06]"
+                              : "border-white/[0.06]"
+                          }`}
                         >
                           <p className="text-xs font-medium text-foreground/80 leading-snug">
                             {tarea.titulo}
@@ -479,8 +549,13 @@ export default function PMWorkspacePage({
                             <span className="text-[9px] text-muted-foreground/30 font-mono">
                               {tarea.responsable}
                             </span>
+                            {humanTouchedIds.has(tarea.id) && (
+                              <span className="ml-auto text-[8px] text-amber-500/60 font-mono uppercase tracking-wider">
+                                edited
+                              </span>
+                            )}
                           </div>
-                        </div>
+                        </button>
                       ))
                     )}
                   </div>
