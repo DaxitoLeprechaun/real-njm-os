@@ -311,6 +311,35 @@ def _parsear_resumen_pm(texto: str) -> Dict[str, str]:
     return campos
 
 
+def _parsear_tareas(texto: str) -> List[Dict[str, Any]]:
+    """
+    Extrae el bloque TAREAS: de la respuesta final del PM.
+    Items sin 'id' o sin 'titulo' se descartan silenciosamente.
+    Retorna [] si el bloque TAREAS: no está presente o está malformado.
+    """
+    section_match = re.search(r"TAREAS:\n((?:[ \t]*[-\w].*\n?)+)", texto, re.MULTILINE)
+    if not section_match:
+        return []
+
+    raw = section_match.group(1)
+    tareas: List[Dict[str, Any]] = []
+
+    items = re.split(r"(?m)^- (?=id:)", raw)
+    for item in items:
+        if not item.strip():
+            continue
+        t: Dict[str, Any] = {}
+        for line in item.splitlines():
+            line = line.strip()
+            if ":" in line:
+                key, _, val = line.partition(":")
+                t[key.strip()] = val.strip()
+        if t.get("id") and t.get("titulo"):
+            tareas.append(t)
+
+    return tareas
+
+
 # ══════════════════════════════════════════════════════════════════
 # NODO LANGGRAPH — nodo_pm
 # ══════════════════════════════════════════════════════════════════
