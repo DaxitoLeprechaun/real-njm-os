@@ -160,3 +160,61 @@ TAREAS:
     assert "tareas_generadas" in parche
     assert len(parche["tareas_generadas"]) == 2
     assert parche["tareas_generadas"][0]["id"] == "tarea-001"
+
+
+import asyncio
+import json
+
+
+def test_sse_emits_task_ready_events(monkeypatch):
+    """_sse_njm_stream must emit task_ready events for each tarea in final state."""
+    import os
+    os.environ.setdefault("OPENAI_API_KEY", "test")
+
+    from agent.njm_graph import init_graph
+    asyncio.run(init_graph())
+    from agent.njm_graph import njm_graph
+
+    fake_tareas = [
+        {
+            "id": "tarea-001",
+            "titulo": "Validar CAC",
+            "descripcion": "Cruzar datos de CRM.",
+            "responsable": "PM",
+            "prioridad": "ALTA",
+            "estado": "BACKLOG",
+            "skill_origen": "generar_business_case",
+        }
+    ]
+
+    class FakeSnapshot:
+        values = {
+            "estado_validacion": "LISTO_PARA_FIRMA",
+            "tareas_generadas": fake_tareas,
+        }
+        next = []
+
+    async def fake_astream_events(state, config, version):
+        yield {"event": "on_chain_end", "name": "pm_execution", "data": {}}
+
+    async def fake_aget_state(config):
+        return FakeSnapshot()
+
+    monkeypatch.setattr(njm_graph, "astream_events", fake_astream_events)
+    monkeypatch.setattr(njm_graph, "aget_state", fake_aget_state)
+
+    from api.v1_router import _sse_njm_stream
+
+    async def collect():
+        events = []
+        async for chunk in _sse_njm_stream("disrupt", "test-session"):
+            raw = chunk.replace("data: ", "").strip()
+            if raw:
+                events.append(json.loads(raw))
+        return events
+
+    events = asyncio.run(collect())
+    types = [e["type"] for e in events]
+    assert "task_ready" in types
+    task_events = [e for e in events if e["type"] == "task_ready"]
+    assert task_events[0]["tarea"]["id"] == "tarea-001"
