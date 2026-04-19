@@ -287,9 +287,67 @@ export default function PMWorkspacePage({
         </p>
         <h1 className="text-2xl font-bold text-foreground capitalize">{params.id}</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          {MOCK_ARTEFACTOS.length} artefactos generados
+            {MOCK_ARTEFACTOS.length + (tarjeta ? 1 : 0)} artefactos generados
         </p>
       </div>
+
+      {/* Live PM Result Card */}
+      {tarjeta && (
+        <div className="mb-8">
+          <p className="text-xs uppercase tracking-widest mb-3 font-semibold text-muted-foreground">
+            Resultado PM
+          </p>
+          <button
+            onClick={() => setActiveArtefacto(tarjetaToArtefacto(tarjeta))}
+            className="w-full glass rounded-xl p-5 text-left group hover:scale-[1.01] active:scale-[0.99] transition-all duration-150 cursor-pointer relative overflow-hidden"
+          >
+            <div
+              className="absolute top-0 left-0 right-0 h-[2px]"
+              style={{
+                background:
+                  tarjeta.estado_ejecucion === "LISTO_PARA_FIRMA"
+                    ? "hsl(var(--pm-accent))"
+                    : "rgb(225 29 72)",
+              }}
+            />
+            <span
+              className="inline-block text-[10px] font-semibold uppercase tracking-widest px-2 py-0.5 rounded-full mb-3"
+              style={{
+                color:
+                  tarjeta.estado_ejecucion === "LISTO_PARA_FIRMA"
+                    ? "hsl(var(--pm-accent))"
+                    : "rgb(251 113 133)",
+                background:
+                  tarjeta.estado_ejecucion === "LISTO_PARA_FIRMA"
+                    ? "hsl(var(--pm-accent) / 0.12)"
+                    : "rgb(225 29 72 / 0.12)",
+              }}
+            >
+              {tarjeta.estado_ejecucion === "LISTO_PARA_FIRMA" ? "Listo para firma" : "Bloqueado CEO"}
+            </span>
+            <h3 className="font-semibold text-foreground text-sm leading-snug">
+              {tarjeta.contenido_tarjeta.propuesta_principal}
+            </h3>
+            <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] transition-all duration-300 ease-out">
+              <div className="overflow-hidden">
+                <div className="mt-3 pt-3 border-t border-white/[0.06]">
+                  <p className="text-xs text-muted-foreground">
+                    <span className="text-muted-foreground/60">Framework:</span>{" "}
+                    {tarjeta.contenido_tarjeta.framework_metodologico}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/40 mt-0.5">
+                    {tarjeta.metadata.skill_utilizada} ·{" "}
+                    {new Date(tarjeta.metadata.timestamp_generacion).toLocaleDateString("es-MX")}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground/30 mt-3 uppercase tracking-wider group-hover:opacity-0 transition-opacity duration-200">
+              {tarjeta.contenido_tarjeta.framework_metodologico}
+            </p>
+          </button>
+        </div>
+      )}
 
       {/* Artifacts Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
