@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 from core.schemas import Tarea, PrioridadTarea, EstadoTarea
 
 
@@ -17,7 +18,7 @@ def test_tarea_schema_valid():
 
 
 def test_tarea_titulo_max_length():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         Tarea(
             id="tarea-002",
             titulo="A" * 61,

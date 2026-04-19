@@ -346,10 +346,15 @@ class EstadoTarea(str, Enum):
 
 
 class Tarea(BaseModel):
-    id: str = Field(..., description="Ej.: 'tarea-001'. Único por sesión.")
+    """
+    Unidad de trabajo táctica emitida por el PM al finalizar.
+    El PM genera mínimo 3 y máximo 10 tareas por ejecución.
+    """
+
+    id: str = Field(..., min_length=1, description="Ej.: 'tarea-001'. Único por sesión.")
     titulo: str = Field(..., max_length=60, description="Título accionable corto.")
-    descripcion: str = Field(..., description="Descripción ejecutable de 1 oración.")
-    responsable: str = Field(..., description="PM | CEO | Encargado Real")
+    descripcion: str = Field(..., min_length=1, description="Descripción ejecutable de 1 oración.")
+    responsable: str = Field(..., min_length=1, description="PM | CEO | Encargado Real")
     prioridad: PrioridadTarea
     estado: EstadoTarea = Field(default=EstadoTarea.BACKLOG)
     skill_origen: str = Field(..., description="Skill PM que generó esta tarea.")
