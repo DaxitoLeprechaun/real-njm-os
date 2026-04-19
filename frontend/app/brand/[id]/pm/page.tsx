@@ -5,10 +5,23 @@ import SlideOver from "@/components/njm/SlideOver";
 import AgentConsole from "@/components/njm/AgentConsole";
 import CEOShield from "@/components/njm/CEOShield";
 import { useAgentConsole } from "@/hooks/useAgentConsole";
+import type { Tarea } from "@/hooks/useAgentConsole";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const SESSION_ID = "dev-session-1";
+
+const KANBAN_COLUMNS: { estado: Tarea["estado"]; label: string }[] = [
+  { estado: "BACKLOG", label: "Backlog" },
+  { estado: "EN_PROGRESO", label: "En Progreso" },
+  { estado: "DONE", label: "Done" },
+];
+
+const PRIORIDAD_BADGE: Record<Tarea["prioridad"], string> = {
+  ALTA:  "bg-rose-500/20 text-rose-400 border-rose-500/30",
+  MEDIA: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+  BAJA:  "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+};
 
 interface TarjetaResultado {
   id_transaccion: string;
@@ -211,6 +224,7 @@ export default function PMWorkspacePage({
   const [terminalExitMessage, setTerminalExitMessage] = useState<string | null>(null);
   const prevRunningRef = useRef(false);
   const agentConsole = useAgentConsole();
+  const { tasks } = agentConsole;
   const agentParams = { brand_id: params.id, session_id: SESSION_ID };
   const shieldOpen = agentConsole.actionRequired?.trigger === "BLOQUEO_CEO";
   const shieldMessage =
@@ -402,7 +416,7 @@ export default function PMWorkspacePage({
         ))}
       </div>
 
-      {/* Tablero Táctico — Phase 2.6 placeholder */}
+      {/* Tablero Táctico — Phase 2.6 */}
       <div className="mt-12">
         <div className="flex items-center gap-3 mb-4">
           <p
@@ -411,16 +425,70 @@ export default function PMWorkspacePage({
           >
             Tablero Táctico
           </p>
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-mono text-muted-foreground/50 border border-white/[0.06]">
-            Phase 2.6
-          </span>
+          {tasks.length > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-mono text-pm/60 border border-pm/20">
+              {tasks.length} tarea{tasks.length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
-        <div className="glass-subtle rounded-xl p-6 border border-white/[0.04] flex items-center gap-3">
-          <span className="text-muted-foreground/30 text-lg" aria-hidden>⏳</span>
-          <p className="text-sm text-muted-foreground/40 font-mono">
-            Esperando desglose táctico del PM...
-          </p>
-        </div>
+
+        {tasks.length === 0 ? (
+          <div className="glass-subtle rounded-xl p-6 border border-white/[0.04] flex items-center gap-3">
+            <span className="text-muted-foreground/30 text-lg" aria-hidden>⏳</span>
+            <p className="text-sm text-muted-foreground/40 font-mono">
+              Esperando desglose táctico del PM...
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-4">
+            {KANBAN_COLUMNS.map(({ estado, label }) => {
+              const col = tasks.filter((t) => t.estado === estado);
+              return (
+                <div key={estado} className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between px-1 mb-1">
+                    <span className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/50">
+                      {label}
+                    </span>
+                    <span className="text-[10px] font-mono text-muted-foreground/30">
+                      {col.length}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2 min-h-[80px]">
+                    {col.length === 0 ? (
+                      <div className="rounded-lg border border-white/[0.04] border-dashed p-3 flex items-center justify-center">
+                        <span className="text-[10px] text-muted-foreground/20 font-mono">vacío</span>
+                      </div>
+                    ) : (
+                      col.map((tarea) => (
+                        <div
+                          key={tarea.id}
+                          className="glass-subtle rounded-lg p-3 border border-white/[0.06] flex flex-col gap-1.5"
+                        >
+                          <p className="text-xs font-medium text-foreground/80 leading-snug">
+                            {tarea.titulo}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground/50 leading-relaxed">
+                            {tarea.descripcion}
+                          </p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span
+                              className={`text-[9px] px-1.5 py-0.5 rounded border font-mono uppercase tracking-wide ${PRIORIDAD_BADGE[tarea.prioridad as Tarea["prioridad"]] ?? ""}`}
+                            >
+                              {tarea.prioridad}
+                            </span>
+                            <span className="text-[9px] text-muted-foreground/30 font-mono">
+                              {tarea.responsable}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* SlideOver: Document Viewer */}
