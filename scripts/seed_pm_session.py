@@ -156,6 +156,7 @@ async def main() -> None:
             "modo": "ejecucion",
             "nombre_marca": "Disrupt",
         },
+        as_node="output",
     )
 
     print(f"\n✓ Seeded thread: {THREAD_ID}")
