@@ -1,13 +1,30 @@
 "use client";
 
-import { useState } from "react";
-import { toast } from "sonner";
+import { useEffect, useRef, useState } from "react";
 import SlideOver from "@/components/njm/SlideOver";
 import AgentConsole from "@/components/njm/AgentConsole";
 import CEOShield from "@/components/njm/CEOShield";
 import { useAgentConsole } from "@/hooks/useAgentConsole";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+const SESSION_ID = "dev-session-1";
+
+interface TarjetaResultado {
+  id_transaccion: string;
+  estado_ejecucion: "LISTO_PARA_FIRMA" | "BLOQUEO_CEO";
+  metadata: {
+    skill_utilizada: string;
+    timestamp_generacion: string;
+  };
+  contenido_tarjeta: {
+    propuesta_principal: string;
+    framework_metodologico: string;
+    check_coherencia_adn: { aprobado: boolean; justificacion: string };
+    archivos_locales_cowork: Array<{ nombre_archivo: string; ruta_absoluta: string }>;
+    log_errores_escalamiento: string[];
+  };
+}
 
 interface Artefacto {
   id: string;
@@ -182,22 +199,6 @@ Semana 11-12:  Retro + planning Q4
   },
 ];
 
-const PM_EXECUTION_SEQUENCE = [
-  "[✓] Iniciando Agente PM...",
-  "[✓] Cargando Libro Vivo — Vectores 1-9...",
-  "[⏳] Evaluando Framework Ansoff para táctica actual...",
-  "[✓] Alineación con Vector 2 (Modelo de Negocio): OK",
-  "[⏳] Analizando restricciones presupuestarias Vector 5...",
-  "[⏳] Calculando ROI estimado para campaña Q2...",
-  "[✓] ROI proyectado: 3.2x en 90 días (baseline conservador)",
-  "[⏳] Redactando Business Case — estructura 4-secciones...",
-  "[✓] Sección 1: Executive Summary — DONE",
-  "[✓] Sección 2: Análisis de Mercado — DONE",
-  "[⏳] Sección 3: Plan de Ejecución — generando milestones...",
-  "[✓] Sección 3: Plan de Ejecución — DONE",
-  "[✓] Sección 4: Métricas & KPIs — DONE",
-  "[✓] Business Case listo para revisión del CEO.",
-];
 
 export default function PMWorkspacePage({
   params,
@@ -205,44 +206,73 @@ export default function PMWorkspacePage({
   params: { id: string };
 }) {
   const [activeArtefacto, setActiveArtefacto] = useState<Artefacto | null>(null);
-  const [shieldOpen, setShieldOpen] = useState(false);
-  const [shieldMessage, setShieldMessage] = useState("");
-  const [threadId, setThreadId] = useState<string | null>(null);
-  const [executing, setExecuting] = useState(false);
-
+  const [tarjeta, setTarjeta] = useState<TarjetaResultado | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [terminalExitMessage, setTerminalExitMessage] = useState<string | null>(null);
+  const prevRunningRef = useRef(false);
   const agentConsole = useAgentConsole();
+  const agentParams = { brand_id: params.id, session_id: SESSION_ID };
+  const shieldOpen = agentConsole.actionRequired?.trigger === "BLOQUEO_CEO";
+  const shieldMessage =
+    agentConsole.actionRequired?.risk_message ??
+    "El PM detectó un riesgo que requiere revisión del CEO.";
 
-  async function handleConsultarPM() {
-    setExecuting(true);
-    agentConsole.invoke("pm-execution");
-    try {
-      const res = await fetch(`${API_URL}/api/ejecutar-tarea`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          peticion: "Ejecuta la táctica de marketing más adecuada para la marca.",
-          modo: "ejecucion",
-          nombre_marca: "Disrupt",
-          thread_id: threadId ?? undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.thread_id) setThreadId(data.thread_id);
-      if (data.estado_ejecucion === "BLOQUEO_CEO") {
-        const msg =
-          data.contenido_tarjeta?.check_coherencia_adn?.justificacion ||
-          data.contenido_tarjeta?.log_errores_escalamiento?.[0] ||
-          "El CEO bloqueó la ejecución por riesgo estratégico.";
-        setShieldMessage(msg);
-        setShieldOpen(true);
-      } else if (!res.ok) {
-        toast.error("Error al consultar el PM");
-      }
-    } catch {
-      toast.error("No se pudo conectar con el backend");
-    } finally {
-      setExecuting(false);
+  function handleConsultarPM() {
+    setTarjeta(null);
+    setTerminalExitMessage(null);
+    agentConsole.invoke("ceo-audit", agentParams);
+  }
+
+  useEffect(() => {
+    if (!prevRunningRef.current || agentConsole.running || agentConsole.actionRequired) {
+      prevRunningRef.current = agentConsole.running;
+      return;
     }
+    prevRunningRef.current = agentConsole.running;
+    const controller = new AbortController();
+    fetch(
+      `${API_URL}/api/v1/session/state?brand_id=${params.id}&session_id=${SESSION_ID}`,
+      { signal: controller.signal }
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.last_tarjeta) setTarjeta(data.last_tarjeta as TarjetaResultado);
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV !== "production") console.warn("[session/state]", err);
+      });
+    return () => controller.abort();
+  }, [agentConsole.running, agentConsole.actionRequired, params.id]);
+
+  useEffect(() => {
+    if (agentConsole.logs.length > 0) setSubmitting(false);
+  }, [agentConsole.logs.length]);
+
+  function tarjetaToArtefacto(t: TarjetaResultado): Artefacto {
+    const rawDate = new Date(t.metadata.timestamp_generacion);
+    const date = isNaN(rawDate.getTime()) ? "—" : rawDate.toLocaleDateString("es-MX");
+    const files =
+      t.contenido_tarjeta.archivos_locales_cowork
+        .map((f) => `- ${f.nombre_archivo}`)
+        .join("\n") || "— sin archivos adjuntos —";
+    const errors =
+      t.contenido_tarjeta.log_errores_escalamiento.length
+        ? "\n\n## Errores de escalamiento\n" +
+          t.contenido_tarjeta.log_errores_escalamiento.map((e) => `- ${e}`).join("\n")
+        : "";
+    return {
+      id: t.id_transaccion,
+      titulo: t.contenido_tarjeta.propuesta_principal,
+      framework: t.contenido_tarjeta.framework_metodologico,
+      tipo: t.estado_ejecucion === "LISTO_PARA_FIRMA" ? "Resultado PM" : "Bloqueado CEO",
+      fecha: date,
+      contenidoMd:
+        `# ${t.contenido_tarjeta.propuesta_principal}\n\n` +
+        `**Framework:** ${t.contenido_tarjeta.framework_metodologico}\n\n` +
+        `**Coherencia ADN:** ${t.contenido_tarjeta.check_coherencia_adn.aprobado ? "✓" : "✗"} ${t.contenido_tarjeta.check_coherencia_adn.justificacion}\n\n` +
+        `## Archivos entregables\n${files}` +
+        errors,
+    };
   }
 
   return (
@@ -257,9 +287,67 @@ export default function PMWorkspacePage({
         </p>
         <h1 className="text-2xl font-bold text-foreground capitalize">{params.id}</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          {MOCK_ARTEFACTOS.length} artefactos generados
+            {MOCK_ARTEFACTOS.length + (tarjeta ? 1 : 0)} artefactos generados
         </p>
       </div>
+
+      {/* Live PM Result Card */}
+      {tarjeta && (
+        <div className="mb-8">
+          <p className="text-xs uppercase tracking-widest mb-3 font-semibold text-muted-foreground">
+            Resultado PM
+          </p>
+          <button
+            onClick={() => setActiveArtefacto(tarjetaToArtefacto(tarjeta))}
+            className="w-full glass rounded-xl p-5 text-left group hover:scale-[1.01] active:scale-[0.99] transition-all duration-150 cursor-pointer relative overflow-hidden"
+          >
+            <div
+              className="absolute top-0 left-0 right-0 h-[2px]"
+              style={{
+                background:
+                  tarjeta.estado_ejecucion === "LISTO_PARA_FIRMA"
+                    ? "hsl(var(--pm-accent))"
+                    : "rgb(225 29 72)",
+              }}
+            />
+            <span
+              className="inline-block text-[10px] font-semibold uppercase tracking-widest px-2 py-0.5 rounded-full mb-3"
+              style={{
+                color:
+                  tarjeta.estado_ejecucion === "LISTO_PARA_FIRMA"
+                    ? "hsl(var(--pm-accent))"
+                    : "rgb(251 113 133)",
+                background:
+                  tarjeta.estado_ejecucion === "LISTO_PARA_FIRMA"
+                    ? "hsl(var(--pm-accent) / 0.12)"
+                    : "rgb(225 29 72 / 0.12)",
+              }}
+            >
+              {tarjeta.estado_ejecucion === "LISTO_PARA_FIRMA" ? "Listo para firma" : "Bloqueado CEO"}
+            </span>
+            <h3 className="font-semibold text-foreground text-sm leading-snug">
+              {tarjeta.contenido_tarjeta.propuesta_principal}
+            </h3>
+            <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] transition-all duration-300 ease-out">
+              <div className="overflow-hidden">
+                <div className="mt-3 pt-3 border-t border-white/[0.06]">
+                  <p className="text-xs text-muted-foreground">
+                    <span className="text-muted-foreground/60">Framework:</span>{" "}
+                    {tarjeta.contenido_tarjeta.framework_metodologico}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/40 mt-0.5">
+                    {tarjeta.metadata.skill_utilizada} ·{" "}
+                    {new Date(tarjeta.metadata.timestamp_generacion).toLocaleDateString("es-MX")}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground/30 mt-3 uppercase tracking-wider group-hover:opacity-0 transition-opacity duration-200">
+              {tarjeta.contenido_tarjeta.framework_metodologico}
+            </p>
+          </button>
+        </div>
+      )}
 
       {/* Artifacts Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -299,7 +387,7 @@ export default function PMWorkspacePage({
                     <span className="text-muted-foreground/60">Framework:</span>{" "}
                     {artefacto.framework}
                   </p>
-                  <p className="text[11px] text-muted-foreground/40 mt-0.5">
+                  <p className="text-[11px] text-muted-foreground/40 mt-0.5">
                     {artefacto.fecha}
                   </p>
                 </div>
@@ -314,20 +402,25 @@ export default function PMWorkspacePage({
         ))}
       </div>
 
-      {/* Simulate CEO Block button — dev/test helper */}
-      <div className="mt-8 flex justify-center">
-        <button
-          onClick={() => setShieldOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-mono font-semibold uppercase tracking-widest transition-all duration-150 hover:brightness-110 active:scale-[0.97]"
-          style={{
-            background: "rgb(225 29 72 / 0.1)",
-            border: "1px solid rgb(225 29 72 / 0.35)",
-            color: "rgb(251 113 133)",
-          }}
-        >
-          <span aria-hidden>🛡</span>
-          Simular Bloqueo CEO
-        </button>
+      {/* Tablero Táctico — Phase 2.6 placeholder */}
+      <div className="mt-12">
+        <div className="flex items-center gap-3 mb-4">
+          <p
+            className="text-xs uppercase tracking-widest font-semibold"
+            style={{ color: "hsl(var(--pm-accent))" }}
+          >
+            Tablero Táctico
+          </p>
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-mono text-muted-foreground/50 border border-white/[0.06]">
+            Phase 2.6
+          </span>
+        </div>
+        <div className="glass-subtle rounded-xl p-6 border border-white/[0.04] flex items-center gap-3">
+          <span className="text-muted-foreground/30 text-lg" aria-hidden>⏳</span>
+          <p className="text-sm text-muted-foreground/40 font-mono">
+            Esperando desglose táctico del PM...
+          </p>
+        </div>
       </div>
 
       {/* SlideOver: Document Viewer */}
@@ -360,18 +453,27 @@ export default function PMWorkspacePage({
         agentLabel="PM Agent"
         logs={agentConsole.logs}
         running={agentConsole.running}
+        exitMessage={terminalExitMessage ?? undefined}
       />
 
       {/* CEO Shield Modal */}
       <CEOShield
         open={shieldOpen}
-        onOpenChange={setShieldOpen}
-        riskMessage={shieldMessage || "El CEO bloqueó la ejecución por riesgo estratégico."}
+        onOpenChange={() => {}}
+        riskMessage={shieldMessage}
+        submitting={submitting}
         onApprove={() => {
-          agentConsole.invoke("ceo-approve");
+          setSubmitting(true);
+          agentConsole.resume("APPROVED", agentParams).then(() =>
+            agentConsole.invoke("ceo-audit", agentParams)
+          );
         }}
         onReject={() => {
-          agentConsole.invoke("ceo-reject");
+          setSubmitting(true);
+          agentConsole.resume("REJECTED", agentParams).then(() => {
+            setTerminalExitMessage("CEO rechazó la ejecución.");
+            agentConsole.invoke("ceo-reject", agentParams);
+          });
         }}
       />
 
@@ -379,7 +481,7 @@ export default function PMWorkspacePage({
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
         <button
           onClick={handleConsultarPM}
-          disabled={executing}
+          disabled={agentConsole.running}
           className="pointer-events-auto flex items-center gap-2.5 px-7 py-3.5 rounded-full font-semibold text-sm text-white transition-all duration-200 hover:brightness-110 active:scale-[0.97] disabled:opacity-60 disabled:cursor-not-allowed"
           style={{
             background: "hsl(var(--pm-accent))",

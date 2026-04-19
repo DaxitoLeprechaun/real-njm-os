@@ -121,16 +121,15 @@ _DEFAULT_SCRIPT = [
     "[✓] Secuencia completada.",
 ]
 
-# ── Dev testing toggle ────────────────────────────────────────────
-# Set True to short-circuit ceo-audit with a BLOQUEO_CEO mock sequence.
-# Flip back to False (or delete) once Phase 2.4 frontend testing is done.
+# Set True to short-circuit ceo-audit with a hardcoded BLOQUEO_CEO sequence
+# for frontend testing without a live OpenAI key.
 _TEST_BLOQUEO_CEO = False
 
 
 async def _sse_bloqueo_ceo_test(
     brand_id: str, session_id: str
 ) -> AsyncGenerator[str, None]:
-    """Hardcoded BLOQUEO_CEO sequence for Phase 2.4 frontend testing."""
+    """Hardcoded BLOQUEO_CEO sequence for frontend testing without a live OpenAI key."""
     logs = [
         f"[⏳] Conectando con NJM OS (brand: {brand_id})...",
         "[⏳] Auditoría CEO iniciada — escaneando vectores estratégicos...",
@@ -154,6 +153,7 @@ async def _sse_bloqueo_ceo_test(
         "brand_id": brand_id,
     })
     # No "done" — stream closes here; shield stays open until CEO decides.
+
 
 
 _DEFAULT_BRAND_CONTEXT = (
