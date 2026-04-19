@@ -87,7 +87,13 @@ export function useAgentConsole(): UseAgentConsoleReturn {
         if (parsed.type === "log") {
           setLogs((prev) => [...prev, parsed.text as string]);
         } else if (parsed.type === "action_required") {
-          setActionRequired(parsed as unknown as ActionRequiredEvent);
+          if (
+            typeof parsed.trigger === "string" &&
+            typeof parsed.session_id === "string" &&
+            typeof parsed.brand_id === "string"
+          ) {
+            setActionRequired(parsed as unknown as ActionRequiredEvent);
+          }
           closeStream();
           setRunning(false);
         } else if (parsed.type === "done") {

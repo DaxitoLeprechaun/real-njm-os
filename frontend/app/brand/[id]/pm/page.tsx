@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import SlideOver from "@/components/njm/SlideOver";
 import AgentConsole from "@/components/njm/AgentConsole";
 import CEOShield from "@/components/njm/CEOShield";
@@ -200,22 +199,6 @@ Semana 11-12:  Retro + planning Q4
   },
 ];
 
-const PM_EXECUTION_SEQUENCE = [
-  "[✓] Iniciando Agente PM...",
-  "[✓] Cargando Libro Vivo — Vectores 1-9...",
-  "[⏳] Evaluando Framework Ansoff para táctica actual...",
-  "[✓] Alineación con Vector 2 (Modelo de Negocio): OK",
-  "[⏳] Analizando restricciones presupuestarias Vector 5...",
-  "[⏳] Calculando ROI estimado para campaña Q2...",
-  "[✓] ROI proyectado: 3.2x en 90 días (baseline conservador)",
-  "[⏳] Redactando Business Case — estructura 4-secciones...",
-  "[✓] Sección 1: Executive Summary — DONE",
-  "[✓] Sección 2: Análisis de Mercado — DONE",
-  "[⏳] Sección 3: Plan de Ejecución — generando milestones...",
-  "[✓] Sección 3: Plan de Ejecución — DONE",
-  "[✓] Sección 4: Métricas & KPIs — DONE",
-  "[✓] Business Case listo para revisión del CEO.",
-];
 
 export default function PMWorkspacePage({
   params,
@@ -241,17 +224,24 @@ export default function PMWorkspacePage({
   }
 
   useEffect(() => {
-    if (prevRunningRef.current && !agentConsole.running && !agentConsole.actionRequired) {
-      fetch(
-        `${API_URL}/api/v1/session/state?brand_id=${params.id}&session_id=${SESSION_ID}`
-      )
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.last_tarjeta) setTarjeta(data.last_tarjeta as TarjetaResultado);
-        })
-        .catch(() => {});
+    if (!prevRunningRef.current || agentConsole.running || agentConsole.actionRequired) {
+      prevRunningRef.current = agentConsole.running;
+      return;
     }
     prevRunningRef.current = agentConsole.running;
+    const controller = new AbortController();
+    fetch(
+      `${API_URL}/api/v1/session/state?brand_id=${params.id}&session_id=${SESSION_ID}`,
+      { signal: controller.signal }
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.last_tarjeta) setTarjeta(data.last_tarjeta as TarjetaResultado);
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV !== "production") console.warn("[session/state]", err);
+      });
+    return () => controller.abort();
   }, [agentConsole.running, agentConsole.actionRequired, params.id]);
 
   useEffect(() => {
@@ -259,7 +249,8 @@ export default function PMWorkspacePage({
   }, [agentConsole.logs.length]);
 
   function tarjetaToArtefacto(t: TarjetaResultado): Artefacto {
-    const date = new Date(t.metadata.timestamp_generacion).toLocaleDateString("es-MX");
+    const rawDate = new Date(t.metadata.timestamp_generacion);
+    const date = isNaN(rawDate.getTime()) ? "—" : rawDate.toLocaleDateString("es-MX");
     const files =
       t.contenido_tarjeta.archivos_locales_cowork
         .map((f) => `- ${f.nombre_archivo}`)
@@ -338,7 +329,7 @@ export default function PMWorkspacePage({
                     <span className="text-muted-foreground/60">Framework:</span>{" "}
                     {artefacto.framework}
                   </p>
-                  <p className="text[11px] text-muted-foreground/40 mt-0.5">
+                  <p className="text-[11px] text-muted-foreground/40 mt-0.5">
                     {artefacto.fecha}
                   </p>
                 </div>
