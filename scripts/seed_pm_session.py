@@ -34,7 +34,7 @@ THREAD_ID = f"{BRAND_ID}:{SESSION_ID}"
 DB_PATH = BACKEND_DIR / "njm_sessions.db"
 
 _TARJETA = {
-    "id_transaccion": str(uuid4()),
+    "id_transaccion": "00000000-seed-0000-0000-dev000000001",
     "estado_ejecucion": "LISTO_PARA_FIRMA",
     "metadata": {
         "skill_utilizada": "generar_business_case",
@@ -117,6 +117,7 @@ _TAREAS = [
 # ── Main ────────────────────────────────────────────────────────────────────
 
 async def main() -> None:
+    os.chdir(BACKEND_DIR)  # ensure njm_graph opens backend/njm_sessions.db
     import aiosqlite
     from agent.njm_graph import init_graph
 
@@ -131,8 +132,8 @@ async def main() -> None:
             await db.execute(
                 "DELETE FROM checkpoint_writes WHERE thread_id = ?", (THREAD_ID,)
             )
-        except Exception:
-            pass  # table may not exist in older versions
+        except Exception as exc:
+            print(f"  (checkpoint_writes not cleared: {exc})", file=sys.stderr)
         await db.commit()
 
     config = {"configurable": {"thread_id": THREAD_ID}}
@@ -156,7 +157,7 @@ async def main() -> None:
             "modo": "ejecucion",
             "nombre_marca": "Disrupt",
         },
-        as_node="output",
+        as_node="output",  # terminal node → snapshot.next=[] → no pending interrupt
     )
 
     print(f"\n✓ Seeded thread: {THREAD_ID}")
