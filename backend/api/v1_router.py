@@ -390,12 +390,23 @@ async def get_session_state(
         raise HTTPException(status_code=500, detail=f"Checkpointer error: {exc}") from exc
 
     values = snapshot.values if snapshot else {}
+    overrides: dict = values.get("task_estado_overrides") or {}
+    tareas_raw: list = values.get("tareas_generadas") or []
+
+    merged_tasks = []
+    for t in tareas_raw:
+        task_copy = dict(t)
+        if task_copy.get("id") in overrides:
+            task_copy["estado"] = overrides[task_copy["id"]]
+        merged_tasks.append(task_copy)
+
     return {
         "audit_status": values.get("audit_status", "PENDING"),
         "interview_questions": values.get("interview_questions"),
         "last_tarjeta": values.get("payload_tarjeta_sugerencia"),
         "documentos_count": len(values.get("documentos_generados", [])),
         "next_interrupt": list(snapshot.next) if snapshot else [],
+        "tasks": merged_tasks,
     }
 
 
@@ -429,3 +440,52 @@ async def agent_resume(body: ResumeRequest):
         raise HTTPException(status_code=500, detail=f"Resume failed: {exc}") from exc
 
     return {"status": "resumed", "thread_id": thread_id}
+
+
+# ══════════════════════════════════════════════════════════════════
+# PATCH /api/v1/tasks/{task_id}
+# ══════════════════════════════════════════════════════════════════
+
+from pydantic import field_validator as _fv  # noqa: PLC0415
+
+_VALID_ESTADOS = {"BACKLOG", "EN_PROGRESO", "DONE"}
+
+
+class TaskUpdateRequest(_BaseModel):
+    brand_id: str
+    session_id: str
+    estado: str
+
+    @_fv("estado")
+    @classmethod
+    def _check_estado(cls, v: str) -> str:
+        if v not in _VALID_ESTADOS:
+            raise ValueError(f"estado must be one of {_VALID_ESTADOS}")
+        return v
+
+
+@router.patch("/tasks/{task_id}")
+async def update_task_estado(task_id: str, body: TaskUpdateRequest):
+    """Persist a Kanban task estado change to the LangGraph checkpointer."""
+    from agent.njm_graph import njm_graph  # noqa: PLC0415
+
+    thread_id = f"{body.brand_id}:{body.session_id}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    try:
+        snapshot = await njm_graph.aget_state(config)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Checkpointer read error: {exc}") from exc
+
+    current_overrides: dict = {}
+    if snapshot:
+        current_overrides = dict(snapshot.values.get("task_estado_overrides") or {})
+
+    current_overrides[task_id] = body.estado
+
+    try:
+        await njm_graph.aupdate_state(config, {"task_estado_overrides": current_overrides})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Checkpointer write error: {exc}") from exc
+
+    return {"task_id": task_id, "estado": body.estado}
