@@ -1,50 +1,44 @@
-# Plan de Demand Generation
-> Generado por Agente PM | NJM OS | 2026-04-18 19:30 UTC
+# Análisis de Matriz de Ansoff
+> Generado por Agente PM | NJM OS | 2026-04-19 23:11 UTC
 
 ---
 
-## KPIs de Demanda
+## Cuadrante Recomendado
 
-- 60 MQLs/mes
-- CPA ≤ $100 USD
-- Tasa de conversión MQL→SQL > 25%
-
----
-
-## Tácticas Inbound y Outbound
-
-- Contenido SEO enfocado en casos de uso de IA en marketing.
-- Campañas de LinkedIn Ads segmentadas por industria.
-- Webinars educativos sobre automatización de marketing.
+### ✅ Market Penetration
+**Nivel de Riesgo:** BAJO — mercado y producto conocidos
 
 ---
 
-## Distribución del Presupuesto (Vector 5 — presupuesto_pauta_mensual_usd)
+## Mapa Completo de Ansoff
 
-| Canal | Inversión Mensual |
-|-------|------------------|
-| LinkedIn Ads | $4,000.00 USD |
-| Contenido SEO | $1,500.00 USD |
-| Webinars | $500.00 USD |
-| **TOTAL** | **$6,000.00 USD** |
-
-> ⚠️ **Validación CEO requerida:** El total debe ser ≤ presupuesto_pauta_mensual_usd del Vector 5.
-> Si supera el límite, el Agente CEO levantará tarjeta roja antes del lanzamiento.
+|                        | **Mercado Existente**      | **Mercado Nuevo**          |
+|------------------------|---------------------------|---------------------------|
+| **Producto Existente** | Market Penetration ← SELECCIONADO         | Market Development          |
+| **Producto Nuevo**     | Product Development        | Diversification             |
 
 ---
 
-## SLA de Alineación con Ventas
+## Justificación Estratégica (Anclada en Vector 2)
 
-Los leads cualificados serán entregados semanalmente al equipo de ventas para seguimiento inmediato.
+La penetración de mercado es la estrategia más adecuada dado el enfoque en maximizar el LTV y reducir el churn, aprovechando la base de clientes existente y mejorando la retención a través de servicios adicionales y personalización.
+
+---
+
+## Plan Táctico de Ejecución
+
+1. Implementar programas de fidelización para clientes actuales.
+1. Optimizar el servicio al cliente para mejorar la satisfacción y retención.
+1. Desarrollar contenido educativo para aumentar el uso del producto.
 
 ---
 
 ## Checklist de Coherencia con el ADN
 
-- [ ] El presupuesto total ≤ presupuesto_pauta_mensual_usd (Vector 5)
-- [ ] El CPA objetivo es ≤ cac_maximo_tolerable_usd (Vector 2)
-- [ ] Los canales seleccionados no son tácticas saturadas del Vector 4
-- [ ] Los canales seleccionados no incluyen tácticas prohibidas (Vector 1 / 8)
+- [ ] El cuadrante seleccionado es viable dado el CAC máximo tolerable (Vector 2)
+- [ ] Las tácticas no superan el presupuesto de pauta mensual (Vector 5)
+- [ ] El objetivo de crecimiento está alineado con la North Star Metric (Vector 7)
+- [ ] Ninguna táctica usa canales prohibidos por las lineas_rojas_marca (Vector 1)
 
 ---
 _Documento generado automáticamente. Requiere firma del Encargado Real._
