@@ -326,3 +326,30 @@ class TarjetaSugerenciaUI(BaseModel):
                 "El PM canceló la generación de artefactos antes de escalar."
             )
         return v
+
+
+# ══════════════════════════════════════════════════════════════════
+# MOTOR DE DESGLOSE — Tarea (Phase 2.6)
+# ══════════════════════════════════════════════════════════════════
+
+
+class PrioridadTarea(str, Enum):
+    ALTA = "ALTA"
+    MEDIA = "MEDIA"
+    BAJA = "BAJA"
+
+
+class EstadoTarea(str, Enum):
+    BACKLOG = "BACKLOG"
+    EN_PROGRESO = "EN_PROGRESO"
+    DONE = "DONE"
+
+
+class Tarea(BaseModel):
+    id: str = Field(..., description="Ej.: 'tarea-001'. Único por sesión.")
+    titulo: str = Field(..., max_length=60, description="Título accionable corto.")
+    descripcion: str = Field(..., description="Descripción ejecutable de 1 oración.")
+    responsable: str = Field(..., description="PM | CEO | Encargado Real")
+    prioridad: PrioridadTarea
+    estado: EstadoTarea = Field(default=EstadoTarea.BACKLOG)
+    skill_origen: str = Field(..., description="Skill PM que generó esta tarea.")
