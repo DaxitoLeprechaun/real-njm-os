@@ -121,6 +121,41 @@ _DEFAULT_SCRIPT = [
     "[✓] Secuencia completada.",
 ]
 
+# ── Dev testing toggle ────────────────────────────────────────────
+# Set True to short-circuit ceo-audit with a BLOQUEO_CEO mock sequence.
+# Flip back to False (or delete) once Phase 2.4 frontend testing is done.
+_TEST_BLOQUEO_CEO = False
+
+
+async def _sse_bloqueo_ceo_test(
+    brand_id: str, session_id: str
+) -> AsyncGenerator[str, None]:
+    """Hardcoded BLOQUEO_CEO sequence for Phase 2.4 frontend testing."""
+    logs = [
+        f"[⏳] Conectando con NJM OS (brand: {brand_id})...",
+        "[⏳] Auditoría CEO iniciada — escaneando vectores estratégicos...",
+        "[⏳] Herramienta: buscar_contexto_marca...",
+        "[✓] buscar_contexto_marca completada.",
+        "[⏳] Analizando coherencia de narrativa de marca...",
+        "[✓] Auditoría CEO completada.",
+    ]
+    for log in logs:
+        yield _sse_json({"type": "log", "text": log})
+        await asyncio.sleep(0.8)
+
+    yield _sse_json({
+        "type": "action_required",
+        "trigger": "BLOQUEO_CEO",
+        "risk_message": (
+            "Se detectó un cambio crítico en la narrativa de marca "
+            "que requiere validación manual."
+        ),
+        "session_id": session_id,
+        "brand_id": brand_id,
+    })
+    # No "done" — stream closes here; shield stays open until CEO decides.
+
+
 _DEFAULT_BRAND_CONTEXT = (
     "Marca: Disrupt Agency — Agencia de marketing B2B enfocada en SaaS latinoamericano. "
     "Etapa: Serie A. CAC objetivo: $120. LTV objetivo: $2,400. "
@@ -311,7 +346,10 @@ async def agent_stream(
     TD-03 resolved: brand_id and session_id now come from query params, not brand_context.
     """
     if sequenceId == "ceo-audit":
-        generator = _sse_njm_stream(brand_id, session_id)
+        if _TEST_BLOQUEO_CEO:
+            generator = _sse_bloqueo_ceo_test(brand_id, session_id)
+        else:
+            generator = _sse_njm_stream(brand_id, session_id)
     else:
         generator = _sse_mock(sequenceId)
 

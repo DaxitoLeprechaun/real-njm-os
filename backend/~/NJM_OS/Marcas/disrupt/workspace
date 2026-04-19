@@ -1,0 +1,50 @@
+# Plan de Demand Generation
+> Generado por Agente PM | NJM OS | 2026-04-18 19:30 UTC
+
+---
+
+## KPIs de Demanda
+
+- 60 MQLs/mes
+- CPA ≤ $100 USD
+- Tasa de conversión MQL→SQL > 25%
+
+---
+
+## Tácticas Inbound y Outbound
+
+- Contenido SEO enfocado en casos de uso de IA en marketing.
+- Campañas de LinkedIn Ads segmentadas por industria.
+- Webinars educativos sobre automatización de marketing.
+
+---
+
+## Distribución del Presupuesto (Vector 5 — presupuesto_pauta_mensual_usd)
+
+| Canal | Inversión Mensual |
+|-------|------------------|
+| LinkedIn Ads | $4,000.00 USD |
+| Contenido SEO | $1,500.00 USD |
+| Webinars | $500.00 USD |
+| **TOTAL** | **$6,000.00 USD** |
+
+> ⚠️ **Validación CEO requerida:** El total debe ser ≤ presupuesto_pauta_mensual_usd del Vector 5.
+> Si supera el límite, el Agente CEO levantará tarjeta roja antes del lanzamiento.
+
+---
+
+## SLA de Alineación con Ventas
+
+Los leads cualificados serán entregados semanalmente al equipo de ventas para seguimiento inmediato.
+
+---
+
+## Checklist de Coherencia con el ADN
+
+- [ ] El presupuesto total ≤ presupuesto_pauta_mensual_usd (Vector 5)
+- [ ] El CPA objetivo es ≤ cac_maximo_tolerable_usd (Vector 2)
+- [ ] Los canales seleccionados no son tácticas saturadas del Vector 4
+- [ ] Los canales seleccionados no incluyen tácticas prohibidas (Vector 1 / 8)
+
+---
+_Documento generado automáticamente. Requiere firma del Encargado Real._

@@ -97,6 +97,14 @@ http://localhost:8000/docs      # Swagger UI
 http://localhost:8000/health    # health check
 ```
 
+### Git worktrees
+Feature work is done in `.worktrees/<branch-name>/`. The `.worktrees/` directory is gitignored. To set up a worktree:
+```bash
+git worktree add .worktrees/<branch> -b feature/<branch>
+# Then symlink node_modules for tsc access:
+ln -sf "$(pwd)/frontend/node_modules" .worktrees/<branch>/frontend/node_modules
+```
+
 ---
 
 ## Architecture
@@ -111,7 +119,7 @@ NJM OS is a monorepo: FastAPI + LangGraph backend, Next.js 14 frontend.
 | Module | Role |
 |---|---|
 | `main.py` | FastAPI app entry point — calls `load_dotenv()` first, then mounts both routers. Has `@asynccontextmanager lifespan` that calls `await init_graph()` on startup and closes the aiosqlite connection on shutdown. `load_dotenv()` **must run before any agent module is imported** — agents instantiate `ChatOpenAI` at module level. |
-| `api/main.py` | `POST /api/ejecutar-tarea` — invokes `njm_graph` via `await njm_graph.ainvoke(...)`. Resolves `brand_id`/`session_id` with dev fallback (see below). Imports `njm_graph` lazily inside the function body (not at module level). |
+| `api/main.py` | `POST /api/ejecutar-tarea` — legacy endpoint, invokes `njm_graph` via `await njm_graph.ainvoke(...)`. Not used by `pm/page.tsx` as of Phase 2.5a. |
 | `api/v1_router.py` | `POST /api/v1/ingest` + `GET /api/v1/agent/stream` (SSE, unified via `njm_graph`) + `GET /api/v1/session/state` (checkpointer hydration) + `POST /api/v1/agent/resume` (graph resumption after interrupt). All `njm_graph` imports are lazy (inside function bodies). |
 | `agent/njm_graph.py` | **Single source of graphs.** Exports `njm_graph` (starts as `None`), `init_graph()` async coroutine, `ceo_graph`, and `AgentState`. `njm_graph` is set by `await init_graph()` — called from lifespan on startup. Also contains `aiosqlite.Connection.is_alive` compatibility shim (see Dependency Pitfalls below). |
 | `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 6 tools (5 original + `buscar_contexto_marca`), agentic loop (max 10 iters). Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
@@ -163,10 +171,10 @@ Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (
 | `estado_validacion == "LISTO_PARA_FIRMA"` | `pm_execution → output` |
 | `estado_validacion == "BLOQUEO_CEO"` | `pm_execution → ceo_review` |
 
-**Stub nodes (Phase 2.1):**
-- `ingest` — passthrough. Real ingestion now available via `POST /api/v1/ingest`; graph node still stub until Phase 2.3.
-- `human_in_loop` — auto-sets `audit_status="COMPLETE"` + injects `_LIBRO_VIVO_DISRUPT`. Real `interrupt()` in Phase 2.3.
-- `ceo_review` — auto-sets `ceo_review_decision="REJECTED"` → routes to output. Real CEOShield in Phase 2.5.
+**Stub nodes:**
+- `ingest` — passthrough. Real ingestion available via `POST /api/v1/ingest`; graph node still stub until Phase 2.3.
+- `human_in_loop` — auto-sets `audit_status="COMPLETE"` + injects `_LIBRO_VIVO_DISRUPT`. Real `interrupt()` pending Phase 2.3.
+- `ceo_review` — auto-sets `ceo_review_decision="REJECTED"` → routes to output. Graph node still stub; CEO Shield UI wired in both `ceo/page.tsx` (Phase 2.4) and `pm/page.tsx` (Phase 2.5a).
 
 **CEO skip guard:** `ceo_auditor_node` returns `{}` immediately if `state["audit_status"] == "COMPLETE"`.
 
@@ -176,7 +184,7 @@ Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (
 
 **Checkpointer:** `AsyncSqliteSaver` on `./njm_sessions.db`. `thread_id = f"{brand_id}:{session_id}"`. Pass `{"configurable": {"thread_id": thread_id}}` to every `ainvoke`/`astream_events`/`aget_state` call. Never use the sync `invoke`/`get_state` — they raise `NotImplementedError` with an async checkpointer.
 
-**Dev fallback** (`api/main.py`): if `brand_id` is empty → `"disrupt"`, `session_id` empty → `"dev-session-1"`. When `brand_id == "disrupt"`, injects `_LIBRO_VIVO_DISRUPT` and sets `audit_status="COMPLETE"` so CEO is skipped and PM runs directly.
+**Dev fallback** (`api/main.py` and `api/v1_router.py`): if `brand_id` is empty → `"disrupt"`, `session_id` empty → `"dev-session-1"`. When `brand_id == "disrupt"`, injects `_LIBRO_VIVO_DISRUPT` and sets `audit_status="COMPLETE"` so CEO is skipped and PM runs directly. Frontend pages use `SESSION_ID = "dev-session-1"` as a module-level constant.
 
 **CEO tools side-effects on state:**
 - `escribir_libro_vivo` → `audit_status="COMPLETE"`, `libro_vivo={...}`
@@ -185,12 +193,14 @@ Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (
 - `iniciar_entrevista_profundidad` → `interview_questions=[...]`
 
 **SSE endpoint (`GET /api/v1/agent/stream?sequenceId=...&brand_id=...&session_id=...`):**
-- `ceo-audit` → streams full `njm_graph` via `astream_events(version="v2")`. Emits JSON events: `{"type":"log","text":"..."}`, `{"type":"action_required","trigger":"BLOQUEO_CEO"|"GAP_DETECTED",...}`, `{"type":"done"}`. Dev fallback: `brand_id="disrupt"` injects `_LIBRO_VIVO_DISRUPT` + skips CEO.
-- `pm-execution`, `ceo-approve`, `ceo-reject` → hardcoded mock scripts (plain-text, legacy `[DONE]` sentinel — Phase 2.4 will wire real PM streaming)
+- `ceo-audit` → streams full `njm_graph` via `astream_events(version="v2")`. Emits JSON events: `{"type":"log","text":"..."}`, `{"type":"action_required","trigger":"BLOQUEO_CEO"|"GAP_DETECTED",...}`, `{"type":"done"}`. Dev fallback: `brand_id="disrupt"` injects `_LIBRO_VIVO_DISRUPT` + skips CEO, so PM executes directly. **This is the sequence both `ceo/page.tsx` and `pm/page.tsx` invoke.**
+- `ceo-approve`, `ceo-reject` → hardcoded mock scripts (plain-text, legacy `[DONE]` sentinel).
+- `pm-execution` — legacy mock script, no longer used by `pm/page.tsx`.
+- `_TEST_BLOQUEO_CEO` flag in `api/v1_router.py` (default `False`): set to `True` to short-circuit `ceo-audit` with a hardcoded BLOQUEO_CEO sequence for frontend testing without a live OpenAI key.
 - Post-stream: calls `await njm_graph.aget_state()` to detect `BLOQUEO_CEO` or graph interrupt (`snapshot.next` truthy) and emit `action_required` event before `done`.
 
 **Session endpoints (Phase 2.3):**
-- `GET /api/v1/session/state?brand_id=&session_id=` → returns `{audit_status, interview_questions, last_tarjeta, documentos_count, next_interrupt}` from checkpointer
+- `GET /api/v1/session/state?brand_id=&session_id=` → returns `{audit_status, interview_questions, last_tarjeta, documentos_count, next_interrupt}` from checkpointer. `last_tarjeta` is `payload_tarjeta_sugerencia` (the `TarjetaSugerenciaUI` JSON).
 - `POST /api/v1/agent/resume` body `{brand_id, session_id, answers}` → resumes graph paused at `human_in_loop_node` via `njm_graph.ainvoke({"human_interview_answers": answers}, config)`
 
 **Thread ID convention:** `thread_id = f"{brand_id}:{session_id}"` — used consistently across all three endpoints and the SSE generator.
@@ -227,22 +237,29 @@ frontend/app/
 └── brand/[id]/
     ├── layout.tsx              # Injects brandId via data-brand-id attr
     ├── ceo/page.tsx            # CEO Workspace — vector grid + ingest dialog + agent console
-    ├── pm/page.tsx             # PM Workspace — artifacts grid + SlideOver + CEOShield
+    ├── pm/page.tsx             # PM Workspace — live TarjetaResultado card + mock artefacts + CEOShield
     └── libro-vivo/page.tsx     # Libro Vivo viewer (read-only)
 ```
 
 **Key components:**
 - `components/njm/` — business components: `Sidebar`, `BrandCard`, `VectorCard`, `SlideOver`, `AgentConsole`, `CEOShield`
 - `components/ui/` — Shadcn UI primitives — **do not modify**. Uses `@base-ui/react` internally (not standard Radix); `Dialog` controlled mode: `<Dialog open={bool} onOpenChange={setFn}>`.
-- `hooks/useAgentConsole` — `invoke(sequenceId, params?)` opens SSE with optional `{brand_id, session_id}`; exposes `open`, `logs`, `running`, `close`, `actionRequired: ActionRequiredEvent | null` (set on `action_required` JSON event, cleared by next `invoke()` call), `resume(answers, params)` (calls `POST /api/v1/agent/resume`). Handles both JSON events (new `ceo-audit`) and legacy plain-text (mock sequences). Hook is complete — do not modify.
+- `hooks/useAgentConsole` — `invoke(sequenceId, params?)` opens SSE with optional `{brand_id, session_id}`; exposes `open`, `logs`, `running`, `close`, `actionRequired: ActionRequiredEvent | null` (set on `action_required` JSON event, cleared by next `invoke()` call), `resume(answers, params)` (calls `POST /api/v1/agent/resume`). Handles both JSON events (new `ceo-audit`) and legacy plain-text (mock sequences). **Hook is complete — do not modify.**
 - `CEOShield` — brutalist Dialog modal (2px rose-600 border). Accepts `submitting?: boolean` to disable buttons during network I/O. Approve path: `resume("APPROVED", params)` → `invoke("ceo-audit", params)`. Reject path: `resume("REJECTED", params)` → `invoke("ceo-reject", params)`. Controlled via `shieldOpen = actionRequired?.trigger === "BLOQUEO_CEO"` — pass `onOpenChange={() => {}}` to prevent Escape-close.
 - `AgentConsole` — accepts optional `exitMessage?: string` to override the "Process exited with code 0" footer (shown in rose-600 bold after rejection).
 
 **Concurrency pattern (CEO Shield):** After `resume()` + `invoke()`, use `useEffect` watching `agentConsole.logs.length > 0` to release the `submitting` lock — not the network promise. This ensures the shield stays blocked until the first SSE log proves the stream restarted ("Optimistic UI Inversion").
 
+**PM Workspace data flow (Phase 2.5a):**
+1. "Consultar PM" → `agentConsole.invoke("ceo-audit", {brand_id, session_id})`
+2. `useEffect` detects `running: true → false` with no `actionRequired` → fetches `GET /api/v1/session/state` with `AbortController`
+3. `last_tarjeta` from response → stored as `tarjeta: TarjetaResultado | null` state
+4. `tarjeta` renders as a live card above `MOCK_ARTEFACTOS`; clicking opens SlideOver via `tarjetaToArtefacto()` helper
+5. If stream emits `action_required` with `trigger: "BLOQUEO_CEO"` → `shieldOpen` becomes true (derived from `agentConsole.actionRequired`, not local state)
+
 **Frontend testing:** No Jest/RTL infrastructure. TypeScript strict mode is the primary safety net. Integration tests deferred to Phase 2.6.
 
-**Mock data state:** `ceo/page.tsx` (`MOCK_VECTORES`) and `pm/page.tsx` (`MOCK_ARTEFACTOS`) render hardcoded data. Neither connected to real backend state. "Consultar PM" invokes mock `pm-execution` SSE script.
+**Mock data state:** `ceo/page.tsx` (`MOCK_VECTORES`) still hardcoded. `pm/page.tsx` (`MOCK_ARTEFACTOS`) shows historical mock artefacts below the live `TarjetaResultado` card — both coexist until Phase 2.6 connects real artefact history.
 
 **Toast:** `import { toast } from "sonner"` — `<Toaster>` mounted in root layout.
 
@@ -261,11 +278,10 @@ When Tailwind JIT can't resolve dynamic HSL strings, use CSS variables: `hsl(var
 
 **Not yet built (see ARCHITECTURE_ROADMAP_PHASE2.md):**
 - Phase 2.3 partial: `interrupt()` in `human_in_loop_node` (stub auto-completes), DayCeroView wizard in CEO Workspace
-- Phase 2.4 — CEO Shield UI **[implementation plan written]**: Wire `CEOShield` + `AgentConsole` into `ceo/page.tsx` to react to `BLOQUEO_CEO`. Plan: `docs/superpowers/plans/2026-04-18-phase-2-4-ceo-shield-ui.md`. Three files: `CEOShield.tsx` (submitting prop), `AgentConsole.tsx` (exitMessage prop), `ceo/page.tsx` (wiring).
-- Phase 2.5: PM SSE streaming real (eliminate `pm-execution` mock), connect "Consultar PM" to real graph
-- Phase 2.6: retry/tenacity, structured PM output, `Last-Event-ID` SSE reconnect, CORS env var, Jest/RTL frontend test infrastructure
+- Phase 2.5b: `ceo-approve` / `ceo-reject` sequences wired to real graph (currently mock scripts); PM artefact history from `documentos_generados`
+- Phase 2.6: Kanban board (Tablero Táctico) with `tareas_generadas` backend event, retry/tenacity, `Last-Event-ID` SSE reconnect, CORS env var, Jest/RTL frontend test infrastructure
 - Frontend contexts: `AgencyContext`, `BrandContext`, `data/brands.ts`
 - Graph `ingest` node wired to real ChromaDB pipeline (currently passthrough stub)
-- `MOCK_VECTORES` (`ceo/page.tsx`) and `MOCK_ARTEFACTOS` (`pm/page.tsx`) still hardcoded — not yet connected to real backend state
+- `MOCK_VECTORES` (`ceo/page.tsx`) not yet connected to real backend state
 
 **Planning artifacts:** `docs/superpowers/specs/` holds approved design specs; `docs/superpowers/plans/` holds step-by-step implementation plans. Read the relevant plan before implementing any pending phase.
