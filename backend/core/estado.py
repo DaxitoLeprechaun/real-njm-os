@@ -98,6 +98,10 @@ class NJM_OS_State(TypedDict):
     alertas_internas: Annotated[List[str], operator.add]
     # Alertas de autocorrección del PM. Max 2 antes de escalar al CEO.
 
+    tareas_generadas: Annotated[List[Dict[str, Any]], operator.add]
+    # Tareas desglosadas por el PM durante la ejecución. Acumulativo entre nodos.
+    # Cada elemento es un dict serializado de Tarea (Phase 2.6).
+
     # ── OUTPUT ─────────────────────────────────────────────────────
     payload_tarjeta_sugerencia: Optional[Dict[str, Any]]
     # TarjetaSugerenciaUI JSON. Emitido por output_node al finalizar el grafo.

@@ -20,11 +20,22 @@ export interface ActionRequiredEvent {
   brand_id: string;
 }
 
+export interface Tarea {
+  id: string;
+  titulo: string;
+  descripcion: string;
+  responsable: "PM" | "CEO" | "Encargado Real";
+  prioridad: "ALTA" | "MEDIA" | "BAJA";
+  estado: "BACKLOG" | "EN_PROGRESO" | "DONE";
+  skill_origen: string;
+}
+
 export interface UseAgentConsoleReturn {
   open: boolean;
   logs: string[];
   running: boolean;
   actionRequired: ActionRequiredEvent | null;
+  tasks: Tarea[];
   invoke: (sequenceId: string, params?: Partial<AgentParams>) => void;
   resume: (answers: string, params: AgentParams) => Promise<void>;
   close: () => void;
@@ -37,6 +48,7 @@ export function useAgentConsole(): UseAgentConsoleReturn {
   const [logs, setLogs] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [actionRequired, setActionRequired] = useState<ActionRequiredEvent | null>(null);
+  const [tasks, setTasks] = useState<Tarea[]>([]);
   const esRef = useRef<EventSource | null>(null);
 
   function closeStream() {
@@ -53,6 +65,7 @@ export function useAgentConsole(): UseAgentConsoleReturn {
       setRunning(true);
       setOpen(true);
       setActionRequired(null);
+      setTasks([]);
 
       const brand_id = params.brand_id ?? "disrupt";
       const session_id = params.session_id ?? "dev-session-1";
@@ -96,6 +109,11 @@ export function useAgentConsole(): UseAgentConsoleReturn {
           }
           closeStream();
           setRunning(false);
+        } else if (parsed.type === "task_ready") {
+          const tarea = parsed.tarea as Tarea;
+          if (tarea?.id && tarea?.titulo) {
+            setTasks((prev) => [...prev, tarea]);
+          }
         } else if (parsed.type === "done") {
           closeStream();
           setRunning(false);
@@ -132,9 +150,10 @@ export function useAgentConsole(): UseAgentConsoleReturn {
     setOpen(false);
     setRunning(false);
     setActionRequired(null);
+    setTasks([]);
   }, []);
 
   useEffect(() => () => closeStream(), []);
 
-  return { open, logs, running, actionRequired, invoke, close, resume };
+  return { open, logs, running, actionRequired, tasks, invoke, close, resume };
 }

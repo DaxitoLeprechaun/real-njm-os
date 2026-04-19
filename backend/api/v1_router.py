@@ -308,6 +308,12 @@ async def _sse_njm_stream(
                 "brand_id": brand_id,
             })
 
+        else:
+            # Emit task_ready events for each tarea in final state.
+            tareas = snapshot.values.get("tareas_generadas", []) or []
+            for tarea in tareas:
+                yield _sse_json({"type": "task_ready", "tarea": tarea})
+
     except Exception as exc:
         yield _sse_json({"type": "log", "text": f"[!] No se pudo leer estado final: {exc}"})
 
