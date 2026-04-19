@@ -102,6 +102,10 @@ class NJM_OS_State(TypedDict):
     # Tareas desglosadas por el PM durante la ejecución. Acumulativo entre nodos.
     # Cada elemento es un dict serializado de Tarea (Phase 2.6).
 
+    task_estado_overrides: Dict[str, str]
+    # Maps task_id → EstadoTarea value. Updated by PATCH /api/v1/tasks/{id}.
+    # No reducer: PATCH endpoint fetches + merges before writing.
+
     # ── OUTPUT ─────────────────────────────────────────────────────
     payload_tarjeta_sugerencia: Optional[Dict[str, Any]]
     # TarjetaSugerenciaUI JSON. Emitido por output_node al finalizar el grafo.
