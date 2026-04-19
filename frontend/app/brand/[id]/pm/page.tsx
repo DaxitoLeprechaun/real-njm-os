@@ -402,6 +402,27 @@ export default function PMWorkspacePage({
         ))}
       </div>
 
+      {/* Tablero Táctico — Phase 2.6 placeholder */}
+      <div className="mt-12">
+        <div className="flex items-center gap-3 mb-4">
+          <p
+            className="text-xs uppercase tracking-widest font-semibold"
+            style={{ color: "hsl(var(--pm-accent))" }}
+          >
+            Tablero Táctico
+          </p>
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-mono text-muted-foreground/50 border border-white/[0.06]">
+            Phase 2.6
+          </span>
+        </div>
+        <div className="glass-subtle rounded-xl p-6 border border-white/[0.04] flex items-center gap-3">
+          <span className="text-muted-foreground/30 text-lg" aria-hidden>⏳</span>
+          <p className="text-sm text-muted-foreground/40 font-mono">
+            Esperando desglose táctico del PM...
+          </p>
+        </div>
+      </div>
+
       {/* SlideOver: Document Viewer */}
       <SlideOver
         open={activeArtefacto !== null}
