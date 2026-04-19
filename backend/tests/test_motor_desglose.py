@@ -28,3 +28,10 @@ def test_tarea_titulo_max_length():
             estado=EstadoTarea.BACKLOG,
             skill_origen="generar_prd",
         )
+
+
+def test_njm_os_state_has_tareas_generadas():
+    from core.estado import NJM_OS_State
+    import typing
+    hints = typing.get_type_hints(NJM_OS_State, include_extras=True)
+    assert "tareas_generadas" in hints
