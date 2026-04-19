@@ -100,3 +100,63 @@ def test_parsear_tareas_malformed_item_skipped():
     tareas = _parsear_tareas(texto)
     assert len(tareas) == 1
     assert tareas[0]["id"] == "tarea-001"
+
+
+def test_nodo_pm_patch_includes_tareas(monkeypatch):
+    """nodo_pm debe incluir tareas_generadas en el parche cuando el LLM las emite."""
+    import os
+    os.environ.setdefault("OPENAI_API_KEY", "test")
+
+    from langchain_core.messages import AIMessage
+    from agentes.agente_pm import nodo_pm
+    from core.dev_fixtures import _LIBRO_VIVO_DISRUPT
+
+    fake_response_with_tareas = AIMessage(content="""
+RESUMEN_PM:
+  skill_utilizada: generar_business_case
+  propuesta_principal: Business case Q3 generado con ROI estimado 3.2x.
+  framework_metodologico: Business Model Canvas
+  check_adn_aprobado: true
+  justificacion_adn: Alineado con Vector 7 North Star Metric
+
+TAREAS:
+- id: tarea-001
+  titulo: Validar supuestos de CAC con datos reales
+  descripcion: Cruzar benchmark de $120 USD CAC con datos históricos de CRM.
+  responsable: Encargado Real
+  prioridad: ALTA
+  estado: BACKLOG
+  skill_origen: generar_business_case
+- id: tarea-002
+  titulo: Presentar Business Case al CEO
+  descripcion: Agendar sesión de 30 min para revisión con stakeholders.
+  responsable: PM
+  prioridad: MEDIA
+  estado: BACKLOG
+  skill_origen: generar_business_case
+""")
+
+    monkeypatch.setattr(
+        "agentes.agente_pm._LLM",
+        type("FakeLLM", (), {
+            "bind_tools": lambda self, tools: type("Bound", (), {
+                "invoke": lambda self, msgs: fake_response_with_tareas
+            })()
+        })()
+    )
+
+    state = {
+        "messages": [],
+        "libro_vivo": _LIBRO_VIVO_DISRUPT,
+        "alertas_internas": [],
+        "documentos_generados": [],
+        "estado_validacion": "EN_PROGRESO",
+        "ruta_espacio_trabajo": "/tmp/test_workspace",
+        "tareas_generadas": [],
+    }
+
+    parche = nodo_pm(state)
+
+    assert "tareas_generadas" in parche
+    assert len(parche["tareas_generadas"]) == 2
+    assert parche["tareas_generadas"][0]["id"] == "tarea-001"

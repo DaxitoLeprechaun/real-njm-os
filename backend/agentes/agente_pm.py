@@ -138,7 +138,29 @@ RESUMEN_PM:
   check_adn_aprobado: <true o false>
   justificacion_adn: <por qué la propuesta es coherente con el Libro Vivo>
 
-Si entraste en bloqueo, en vez del resumen, escribe:
+TAREAS:
+- id: tarea-001
+  titulo: <título accionable, máx 60 caracteres>
+  descripcion: <descripción ejecutable de 1 oración>
+  responsable: <PM | CEO | Encargado Real>
+  prioridad: <ALTA | MEDIA | BAJA>
+  estado: BACKLOG
+  skill_origen: <nombre de la skill que originó esta tarea>
+- id: tarea-002
+  titulo: <siguiente tarea>
+  descripcion: <descripción>
+  responsable: <PM | CEO | Encargado Real>
+  prioridad: <ALTA | MEDIA | BAJA>
+  estado: BACKLOG
+  skill_origen: <nombre skill>
+
+Reglas del bloque TAREAS:
+- Genera MÍNIMO 3 y MÁXIMO 10 tareas derivadas de la skill ejecutada.
+- Cada tarea debe ser una acción concreta y verificable (NO "Hacer marketing", SÍ "Redactar 3 copies para Instagram").
+- El campo 'responsable' debe asignarse según quién ejecuta: PM para tareas del agente, CEO para validaciones estratégicas, Encargado Real para acciones humanas.
+- Mantén 'estado: BACKLOG' en todas — el humano actualiza el estado.
+
+Si entraste en bloqueo, en vez del resumen y tareas, escribe:
 BLOQUEO_CEO:
   motivo: <qué restricción del Libro Vivo no se puede satisfacer>
   intentos_realizados: <número>
@@ -484,6 +506,11 @@ def nodo_pm(state: NJM_OS_State) -> Dict[str, Any]:
 
     # Si no hay documentos ni bloqueo explícito, el estado permanece EN_PROGRESO
     # (el nodo fue conversacional o el LLM está razonando).
+
+    # Extract tareas regardless of outcome (success or bloqueo).
+    nuevas_tareas = _parsear_tareas(respuesta_final_texto)
+    if nuevas_tareas:
+        parche["tareas_generadas"] = nuevas_tareas
 
     # ── 8. Construir parche final ─────────────────────────────────
     parche["messages"] = nuevos_mensajes
