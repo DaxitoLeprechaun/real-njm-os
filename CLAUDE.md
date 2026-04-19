@@ -37,11 +37,13 @@ Requires `backend/.env` with `OPENAI_API_KEY=sk-...`
 ### Run tests
 ```bash
 cd backend
-.venv/bin/python3 -m pytest tests/ -v               # all tests
-.venv/bin/python3 -m pytest tests/test_rag.py -v    # single file
-.venv/bin/python3 -m pytest tests/test_v1_sse.py -v # SSE endpoint tests (no real API calls — monkeypatched)
+.venv/bin/python3 -m pytest tests/ -v                        # all tests
+.venv/bin/python3 -m pytest tests/test_rag.py -v             # single file (requires live OPENAI_API_KEY)
+.venv/bin/python3 -m pytest tests/test_v1_sse.py -v          # SSE endpoint tests (monkeypatched, no API key needed)
+.venv/bin/python3 -m pytest tests/test_motor_desglose.py -v      # Tarea schema + _parsear_tareas + task_ready SSE
+.venv/bin/python3 -m pytest tests/test_tablero_interactivo.py -v  # task_estado_overrides + PATCH endpoint + session/state merge
 ```
-Tests that call `upsert_chunks` or `query_brand` make real OpenAI embedding API calls — requires a valid key in `backend/.env`. SSE tests mock `njm_graph` fully and run without a key.
+Tests that call `upsert_chunks` or `query_brand` make real OpenAI embedding API calls — requires a valid key in `backend/.env`. All other tests (including SSE, motor_desglose, and tablero_interactivo) mock `njm_graph` fully and run without a key.
 
 ### Smoke test (verify graph compiles and agents load)
 ```bash
@@ -91,6 +93,14 @@ npm run build            # production build (also type-checks)
 ```
 Env: `frontend/.env.local` must have `NEXT_PUBLIC_API_URL=http://localhost:8000`
 
+### Seed dev session (test Kanban without OpenAI key)
+```bash
+# From repo root — writes CEO-approved state + 5 tasks into backend/njm_sessions.db
+python3 scripts/seed_pm_session.py
+# Then start the backend and open /brand/disrupt/pm
+```
+Idempotent — safe to re-run. Must run from repo root (script calls `os.chdir(backend/)` internally).
+
 ### API docs
 ```
 http://localhost:8000/docs      # Swagger UI
@@ -123,11 +133,11 @@ NJM OS is a monorepo: FastAPI + LangGraph backend, Next.js 14 frontend.
 | `api/v1_router.py` | `POST /api/v1/ingest` + `GET /api/v1/agent/stream` (SSE, unified via `njm_graph`) + `GET /api/v1/session/state` (checkpointer hydration) + `POST /api/v1/agent/resume` (graph resumption after interrupt). All `njm_graph` imports are lazy (inside function bodies). |
 | `agent/njm_graph.py` | **Single source of graphs.** Exports `njm_graph` (starts as `None`), `init_graph()` async coroutine, `ceo_graph`, and `AgentState`. `njm_graph` is set by `await init_graph()` — called from lifespan on startup. Also contains `aiosqlite.Connection.is_alive` compatibility shim (see Dependency Pitfalls below). |
 | `agentes/agente_ceo.py` | `nodo_ceo` — CEO node with 6 tools (5 original + `buscar_contexto_marca`), agentic loop (max 10 iters). Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
-| `agentes/agente_pm.py` | `nodo_pm` — PM node with 15 tools (14 PM skills + `buscar_contexto_marca`), max 12 iters. Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. |
-| `core/estado.py` | `NJM_OS_State` TypedDict — 23-field unified LangGraph state. `NJM_PM_State` is an alias (deprecated). |
+| `agentes/agente_pm.py` | `nodo_pm` — PM node with 15 tools (14 PM skills + `buscar_contexto_marca`), max 12 iters. Singleton `_LLM = ChatOpenAI(model="gpt-4o", temperature=0)`. Contains `_parsear_tareas(texto) -> List[Dict]` — extracts `TAREAS:` YAML block from final response; items missing `id` or `titulo` are silently skipped. |
+| `core/estado.py` | `NJM_OS_State` TypedDict — unified LangGraph state. `NJM_PM_State` is a deprecated alias. Includes `tareas_generadas: Annotated[List[Dict], operator.add]` (append-only) and `task_estado_overrides: Dict[str, str]` (no reducer, last-write-wins) — the latter stores human Kanban estado changes keyed by task id. |
 | `core/rag.py` | ChromaDB singleton client + collection manager. `get_collection(brand_id)`, `upsert_chunks(brand_id, chunks, source)`, `query_brand(brand_id, query, n_results)`. Persistent store at `backend/chroma_db/` (gitignored). Thread-safe via double-checked locking. |
 | `core/ingest.py` | RAG ingestion pipeline: `extract_text(bytes, filename)` (PDF via PyMuPDF, text via UTF-8 decode) → `chunk_text(text, chunk_size=500, overlap=80)` → `upsert_chunks`. Top-level `ingest_document(brand_id, file_bytes, filename) -> int`. |
-| `core/schemas.py` | Pydantic v2: `LibroVivo` (9 vectors), `TarjetaSugerenciaUI`, `EstadoValidacion` enum |
+| `core/schemas.py` | Pydantic v2: `LibroVivo` (9 vectors), `TarjetaSugerenciaUI`, `EstadoValidacion` enum, `Tarea` + `PrioridadTarea` + `EstadoTarea` |
 | `core/dev_fixtures.py` | `_LIBRO_VIVO_DISRUPT` mock. Only imported in dev fallback paths — never in production. |
 | `tools/pm_skills.py` | 14 `@tool`-decorated PM skills (business case, Ansoff, PRD, etc.) |
 | `tools/retrieval_tool.py` | `buscar_contexto_marca` `@tool` — semantic search over ChromaDB for a brand. Used by both CEO and PM agents. |
@@ -193,15 +203,16 @@ Routing is driven by `audit_status` (set by CEO tools) and `estado_validacion` (
 - `iniciar_entrevista_profundidad` → `interview_questions=[...]`
 
 **SSE endpoint (`GET /api/v1/agent/stream?sequenceId=...&brand_id=...&session_id=...`):**
-- `ceo-audit` → streams full `njm_graph` via `astream_events(version="v2")`. Emits JSON events: `{"type":"log","text":"..."}`, `{"type":"action_required","trigger":"BLOQUEO_CEO"|"GAP_DETECTED",...}`, `{"type":"done"}`. Dev fallback: `brand_id="disrupt"` injects `_LIBRO_VIVO_DISRUPT` + skips CEO, so PM executes directly. **This is the sequence both `ceo/page.tsx` and `pm/page.tsx` invoke.**
+- `ceo-audit` → streams full `njm_graph` via `astream_events(version="v2")`. Emits JSON events: `{"type":"log","text":"..."}`, `{"type":"action_required","trigger":"BLOQUEO_CEO"|"GAP_DETECTED",...}`, `{"type":"task_ready","tarea":{...}}` (one per tarea, Phase 2.6), `{"type":"done"}`. Dev fallback: `brand_id="disrupt"` injects `_LIBRO_VIVO_DISRUPT` + skips CEO, so PM executes directly. **This is the sequence both `ceo/page.tsx` and `pm/page.tsx` invoke.**
 - `ceo-approve`, `ceo-reject` → hardcoded mock scripts (plain-text, legacy `[DONE]` sentinel).
 - `pm-execution` — legacy mock script, no longer used by `pm/page.tsx`.
 - `_TEST_BLOQUEO_CEO` flag in `api/v1_router.py` (default `False`): set to `True` to short-circuit `ceo-audit` with a hardcoded BLOQUEO_CEO sequence for frontend testing without a live OpenAI key.
 - Post-stream: calls `await njm_graph.aget_state()` to detect `BLOQUEO_CEO` or graph interrupt (`snapshot.next` truthy) and emit `action_required` event before `done`.
 
-**Session endpoints (Phase 2.3):**
-- `GET /api/v1/session/state?brand_id=&session_id=` → returns `{audit_status, interview_questions, last_tarjeta, documentos_count, next_interrupt}` from checkpointer. `last_tarjeta` is `payload_tarjeta_sugerencia` (the `TarjetaSugerenciaUI` JSON).
+**Session endpoints (Phase 2.3 + 2.7):**
+- `GET /api/v1/session/state?brand_id=&session_id=` → returns `{audit_status, interview_questions, last_tarjeta, documentos_count, next_interrupt, tasks}`. `last_tarjeta` is `payload_tarjeta_sugerencia`. `tasks` is `tareas_generadas` with `task_estado_overrides` applied (human-set estado wins over AI original) — used for mount-time Kanban hydration.
 - `POST /api/v1/agent/resume` body `{brand_id, session_id, answers}` → resumes graph paused at `human_in_loop_node` via `njm_graph.ainvoke({"human_interview_answers": answers}, config)`
+- `PATCH /api/v1/tasks/{task_id}` body `{brand_id, session_id, estado}` → fetch-merge-write: reads `task_estado_overrides` from checkpointer, merges single change, calls `aupdate_state()`. `estado` must be `BACKLOG|EN_PROGRESO|DONE` (422 otherwise). Called by frontend on every Kanban card click.
 
 **Thread ID convention:** `thread_id = f"{brand_id}:{session_id}"` — used consistently across all three endpoints and the SSE generator.
 
@@ -213,6 +224,7 @@ NJM_OS_State.libro_vivo (9 vectors, CEO-validated JSON)
   → nodo_pm reads libro_vivo to build dynamic system prompt
   → PM agentic loop with 15 tools (14 skills + buscar_contexto_marca)
   → payload_tarjeta_sugerencia (TarjetaSugerenciaUI JSON → Next.js)
+  → tareas_generadas (List[Dict] from TAREAS: block → task_ready SSE events → Kanban board)
 ```
 
 ### Dependency Pitfalls
@@ -237,29 +249,37 @@ frontend/app/
 └── brand/[id]/
     ├── layout.tsx              # Injects brandId via data-brand-id attr
     ├── ceo/page.tsx            # CEO Workspace — vector grid + ingest dialog + agent console
-    ├── pm/page.tsx             # PM Workspace — live TarjetaResultado card + mock artefacts + CEOShield
+    ├── pm/page.tsx             # PM Workspace — live TarjetaResultado card + Kanban Táctico (3 cols) + mock artefacts + CEOShield
     └── libro-vivo/page.tsx     # Libro Vivo viewer (read-only)
 ```
 
 **Key components:**
 - `components/njm/` — business components: `Sidebar`, `BrandCard`, `VectorCard`, `SlideOver`, `AgentConsole`, `CEOShield`
 - `components/ui/` — Shadcn UI primitives — **do not modify**. Uses `@base-ui/react` internally (not standard Radix); `Dialog` controlled mode: `<Dialog open={bool} onOpenChange={setFn}>`.
-- `hooks/useAgentConsole` — `invoke(sequenceId, params?)` opens SSE with optional `{brand_id, session_id}`; exposes `open`, `logs`, `running`, `close`, `actionRequired: ActionRequiredEvent | null` (set on `action_required` JSON event, cleared by next `invoke()` call), `resume(answers, params)` (calls `POST /api/v1/agent/resume`). Handles both JSON events (new `ceo-audit`) and legacy plain-text (mock sequences). **Hook is complete — do not modify.**
+- `hooks/useAgentConsole` — `invoke(sequenceId, params?)` opens SSE with optional `{brand_id, session_id}`; exposes `open`, `logs`, `running`, `close`, `actionRequired: ActionRequiredEvent | null` (set on `action_required` JSON event, cleared by next `invoke()` call), `tasks: Tarea[]` (accumulated from `task_ready` events, cleared on next `invoke()`, Phase 2.6), `resume(answers, params)` (calls `POST /api/v1/agent/resume`). Handles both JSON events (`ceo-audit`) and legacy plain-text (mock sequences).
 - `CEOShield` — brutalist Dialog modal (2px rose-600 border). Accepts `submitting?: boolean` to disable buttons during network I/O. Approve path: `resume("APPROVED", params)` → `invoke("ceo-audit", params)`. Reject path: `resume("REJECTED", params)` → `invoke("ceo-reject", params)`. Controlled via `shieldOpen = actionRequired?.trigger === "BLOQUEO_CEO"` — pass `onOpenChange={() => {}}` to prevent Escape-close.
 - `AgentConsole` — accepts optional `exitMessage?: string` to override the "Process exited with code 0" footer (shown in rose-600 bold after rejection).
 
 **Concurrency pattern (CEO Shield):** After `resume()` + `invoke()`, use `useEffect` watching `agentConsole.logs.length > 0` to release the `submitting` lock — not the network promise. This ensures the shield stays blocked until the first SSE log proves the stream restarted ("Optimistic UI Inversion").
 
-**PM Workspace data flow (Phase 2.5a):**
+**PM Workspace data flow:**
 1. "Consultar PM" → `agentConsole.invoke("ceo-audit", {brand_id, session_id})`
-2. `useEffect` detects `running: true → false` with no `actionRequired` → fetches `GET /api/v1/session/state` with `AbortController`
-3. `last_tarjeta` from response → stored as `tarjeta: TarjetaResultado | null` state
-4. `tarjeta` renders as a live card above `MOCK_ARTEFACTOS`; clicking opens SlideOver via `tarjetaToArtefacto()` helper
-5. If stream emits `action_required` with `trigger: "BLOQUEO_CEO"` → `shieldOpen` becomes true (derived from `agentConsole.actionRequired`, not local state)
+2. Stream emits `task_ready` events → `agentConsole.tasks: Tarea[]` accumulates live; Kanban fills in real time
+3. `useEffect` detects `running: true → false` with no `actionRequired` → fetches `GET /api/v1/session/state` with `AbortController`
+4. `last_tarjeta` from response → stored as `tarjeta: TarjetaResultado | null` state
+5. `tarjeta` renders as a live card above `MOCK_ARTEFACTOS`; clicking opens SlideOver via `tarjetaToArtefacto()` helper
+6. If stream emits `action_required` with `trigger: "BLOQUEO_CEO"` → `shieldOpen` becomes true (derived from `agentConsole.actionRequired`, not local state)
 
-**Frontend testing:** No Jest/RTL infrastructure. TypeScript strict mode is the primary safety net. Integration tests deferred to Phase 2.6.
+**Kanban Táctico (`pm/page.tsx`):** 3-column board (BACKLOG / EN_PROGRESO / DONE). Cards are interactive buttons — click cycles estado via `ESTADO_CYCLE` constant. State is managed in `localTasks: Tarea[]` (not `agentConsole.tasks` directly). Three sync sources:
+1. SSE `task_ready` events → merged into `localTasks` preserving any human overrides already set
+2. Mount hydration → `GET /session/state` on load seeds `localTasks` from `data.tasks` (overrides pre-applied by backend)
+3. `handleConsultarPM` → clears `localTasks` before re-invoking
 
-**Mock data state:** `ceo/page.tsx` (`MOCK_VECTORES`) still hardcoded. `pm/page.tsx` (`MOCK_ARTEFACTOS`) shows historical mock artefacts below the live `TarjetaResultado` card — both coexist until Phase 2.6 connects real artefact history.
+Click flow: optimistic update → `patchingTaskIds.add(id)` (disables card) → `PATCH /api/v1/tasks/{id}` → `.finally()` clears lock; rollback on failure. `humanTouchedIds: Set<string>` tracks which cards got amber left-border + "edited" badge (session-only, not persisted — estado is the ground truth). `KANBAN_COLUMNS` and `PRIORIDAD_BADGE` are module-level constants.
+
+**Frontend testing:** No Jest/RTL infrastructure. TypeScript strict mode is the primary safety net.
+
+**Mock data state:** `ceo/page.tsx` (`MOCK_VECTORES`) still hardcoded. `pm/page.tsx` (`MOCK_ARTEFACTOS`) shows historical mock artefacts below the live `TarjetaResultado` card and Kanban — mock artefacts coexist with real data until PM artefact history is connected.
 
 **Toast:** `import { toast } from "sonner"` — `<Toaster>` mounted in root layout.
 
@@ -277,9 +297,9 @@ When Tailwind JIT can't resolve dynamic HSL strings, use CSS variables: `hsl(var
 **Design constraints:** Never use chat bubble interfaces. `nature-bg.jpg` lives in `frontend/public/`.
 
 **Not yet built (see ARCHITECTURE_ROADMAP_PHASE2.md):**
-- Phase 2.3 partial: `interrupt()` in `human_in_loop_node` (stub auto-completes), DayCeroView wizard in CEO Workspace
-- Phase 2.5b: `ceo-approve` / `ceo-reject` sequences wired to real graph (currently mock scripts); PM artefact history from `documentos_generados`
-- Phase 2.6: Kanban board (Tablero Táctico) with `tareas_generadas` backend event, retry/tenacity, `Last-Event-ID` SSE reconnect, CORS env var, Jest/RTL frontend test infrastructure
+- `interrupt()` in `human_in_loop_node` (stub auto-completes today); DayCeroView wizard in CEO Workspace
+- `ceo-approve` / `ceo-reject` sequences wired to real graph (currently mock scripts)
+- PM artefact history from `documentos_generados` (today only `TarjetaResultado` card is live)
 - Frontend contexts: `AgencyContext`, `BrandContext`, `data/brands.ts`
 - Graph `ingest` node wired to real ChromaDB pipeline (currently passthrough stub)
 - `MOCK_VECTORES` (`ceo/page.tsx`) not yet connected to real backend state
