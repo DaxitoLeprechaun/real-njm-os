@@ -19,6 +19,13 @@ from core.estado import NJM_OS_State
 def test_njm_os_state_has_task_estado_overrides():
     hints = typing.get_type_hints(NJM_OS_State, include_extras=True)
     assert "task_estado_overrides" in hints
+    # Must be plain Dict (no Annotated reducer) — fetch-merge-write requires last-write-wins.
+    raw = hints["task_estado_overrides"]
+    import typing as _t
+    origin = getattr(raw, "__origin__", None)
+    assert origin is dict or str(raw).startswith("typing.Dict"), (
+        f"task_estado_overrides must be plain Dict[str, str] with no reducer, got {raw}"
+    )
 
 
 @pytest.fixture(scope="module")
