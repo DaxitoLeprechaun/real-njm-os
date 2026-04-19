@@ -232,7 +232,9 @@ export default function PMWorkspacePage({
   const agentConsole = useAgentConsole();
   const { tasks } = agentConsole;
   const [localTasks, setLocalTasks] = useState<Tarea[]>([]);
-  const [patchingTaskId, setPatchingTaskId] = useState<string | null>(null);
+  const [patchingTaskIds, setPatchingTaskIds] = useState<Set<string>>(new Set());
+  // Intentionally not persisted: estado is the ground truth (backend stores overrides).
+  // On reload, the amber "edited" indicator is cleared but the correct estado is hydrated.
   const [humanTouchedIds, setHumanTouchedIds] = useState<Set<string>>(new Set());
   const agentParams = { brand_id: params.id, session_id: SESSION_ID };
   const shieldOpen = agentConsole.actionRequired?.trigger === "BLOQUEO_CEO";
@@ -243,6 +245,7 @@ export default function PMWorkspacePage({
   function handleConsultarPM() {
     setTarjeta(null);
     setTerminalExitMessage(null);
+    setLocalTasks([]);
     agentConsole.invoke("ceo-audit", agentParams);
   }
 
@@ -303,7 +306,7 @@ export default function PMWorkspacePage({
       prev.map((t) => (t.id === tareaId ? { ...t, estado: nextEstado } : t))
     );
     setHumanTouchedIds((prev) => new Set(prev).add(tareaId));
-    setPatchingTaskId(tareaId);
+    setPatchingTaskIds((prev) => new Set(prev).add(tareaId));
     fetch(`${API_URL}/api/v1/tasks/${tareaId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -323,7 +326,7 @@ export default function PMWorkspacePage({
           return next;
         });
       })
-      .finally(() => setPatchingTaskId(null));
+      .finally(() => setPatchingTaskIds((prev) => { const next = new Set(prev); next.delete(tareaId); return next; }));
   }
 
   function tarjetaToArtefacto(t: TarjetaResultado): Artefacto {
@@ -527,10 +530,10 @@ export default function PMWorkspacePage({
                         <button
                           key={tarea.id}
                           onClick={() => handleEstadoChange(tarea.id, tarea.estado)}
-                          disabled={patchingTaskId === tarea.id}
+                          disabled={patchingTaskIds.has(tarea.id)}
                           className={`glass-subtle rounded-lg p-3 flex flex-col gap-1.5 text-left w-full cursor-pointer hover:border-white/[0.14] active:scale-[0.98] transition-all duration-100 disabled:opacity-50 disabled:cursor-not-allowed border ${
                             humanTouchedIds.has(tarea.id)
-                              ? "border-l-2 border-amber-500/40 border-r border-r-white/[0.06] border-t border-t-white/[0.06] border-b border-b-white/[0.06]"
+                              ? "border-white/[0.06] border-l-2 border-l-amber-500/40"
                               : "border-white/[0.06]"
                           }`}
                         >
