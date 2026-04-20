@@ -320,6 +320,58 @@ async def _sse_njm_stream(
     yield _sse_json({"type": "done"})
 
 
+async def _sse_artefact_stream(
+    brand_id: str,
+    session_id: str,
+    task_id: str,
+    task_title: str,
+) -> AsyncGenerator[str, None]:
+    from langchain_openai import ChatOpenAI  # noqa: PLC0415
+    from langchain_core.messages import HumanMessage as _HM, SystemMessage as _SM  # noqa: PLC0415
+    from core.rag import query_brand  # noqa: PLC0415
+    from agent.njm_graph import njm_graph  # noqa: PLC0415
+
+    thread_id = f"{brand_id}:{session_id}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    try:
+        context = query_brand(brand_id, task_title, n_results=5)
+    except Exception:
+        context = "Contexto de marca no disponible."
+
+    system_prompt = (
+        "Eres el PM estratégico de NJM OS. "
+        "Genera un documento en Markdown completo y ejecutable para la tarea dada. "
+        "Estructura obligatoria: # Título, ## Resumen Ejecutivo, ## Análisis, "
+        "## Plan de Acción (5-7 pasos numerados), ## Métricas de Éxito, ## Riesgos. "
+        "Ancla las propuestas al contexto del Libro Vivo proporcionado."
+    )
+    human_prompt = f"Tarea: {task_title}\n\nContexto del Libro Vivo:\n{context}"
+
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    full_text = ""
+
+    try:
+        async for chunk in llm.astream([_SM(content=system_prompt), _HM(content=human_prompt)]):
+            if chunk.content:
+                full_text += chunk.content
+                yield _sse_json({"type": "log", "text": chunk.content})
+    except Exception as exc:
+        yield _sse_json({"type": "log", "text": f"\n\n[Error de generación: {exc}]"})
+
+    try:
+        snapshot = await njm_graph.aget_state(config)
+        current: dict = {}
+        if snapshot:
+            current = dict(snapshot.values.get("artefactos_generados") or {})
+        current[task_id] = full_text
+        await njm_graph.aupdate_state(config, {"artefactos_generados": current})
+    except Exception:
+        pass
+
+    yield _sse_json({"type": "done"})
+
+
 async def _sse_mock(sequence_id: str) -> AsyncGenerator[str, None]:
     script = _MOCK_SCRIPTS.get(sequence_id, _DEFAULT_SCRIPT)
 
@@ -342,12 +394,15 @@ async def agent_stream(
     sequenceId: str,
     brand_id: str = "disrupt",
     session_id: str = "dev-session-1",
+    task_id: str = "",
+    task_title: str = "",
 ):
     """
     Unified SSE agent stream.
 
-    sequenceId=ceo-audit  → streams real njm_graph (brand_id + session_id required)
-    sequenceId=<other>    → mock script (pm-execution, ceo-approve, ceo-reject)
+    sequenceId=ceo-audit            → streams real njm_graph (brand_id + session_id required)
+    sequenceId=pm-generate-artefact → streams artefact generation for a task (task_id + task_title required)
+    sequenceId=<other>              → mock script (pm-execution, ceo-approve, ceo-reject)
 
     TD-03 resolved: brand_id and session_id now come from query params, not brand_context.
     """
@@ -356,6 +411,10 @@ async def agent_stream(
             generator = _sse_bloqueo_ceo_test(brand_id, session_id)
         else:
             generator = _sse_njm_stream(brand_id, session_id)
+    elif sequenceId == "pm-generate-artefact":
+        if not task_id or not task_title:
+            raise HTTPException(status_code=422, detail="task_id and task_title required")
+        generator = _sse_artefact_stream(brand_id, session_id, task_id, task_title)
     else:
         generator = _sse_mock(sequenceId)
 
