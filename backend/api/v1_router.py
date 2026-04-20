@@ -328,17 +328,31 @@ async def _sse_artefact_stream(
 ) -> AsyncGenerator[str, None]:
     from langchain_openai import ChatOpenAI  # noqa: PLC0415
     from langchain_core.messages import HumanMessage as _HM, SystemMessage as _SM  # noqa: PLC0415
-    from core.rag import query_brand  # noqa: PLC0415
+    import core.rag as _rag  # noqa: PLC0415
     from agent.njm_graph import njm_graph  # noqa: PLC0415
 
     thread_id = f"{brand_id}:{session_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
+    # 1. Fetch session state for Libro Vivo context (strategic anchoring)
+    libro_vivo_text = ""
     try:
-        context = query_brand(brand_id, task_title, n_results=5)
+        pre_snapshot = await njm_graph.aget_state(config)
+        if pre_snapshot:
+            lv = pre_snapshot.values.get("libro_vivo")
+            if lv:
+                import json as _json  # noqa: PLC0415
+                libro_vivo_text = _json.dumps(lv, ensure_ascii=False, indent=2)
     except Exception:
-        context = "Contexto de marca no disponible."
+        pass
 
+    # 2. RAG context via direct query_brand call (async-safe)
+    try:
+        rag_context = await asyncio.to_thread(_rag.query_brand, brand_id, task_title, n_results=5)
+    except Exception:
+        rag_context = "Contexto de marca no disponible."
+
+    # 3. Build focused strategic prompt
     system_prompt = (
         "Eres el PM estratégico de NJM OS. "
         "Genera un documento en Markdown completo y ejecutable para la tarea dada. "
@@ -346,8 +360,16 @@ async def _sse_artefact_stream(
         "## Plan de Acción (5-7 pasos numerados), ## Métricas de Éxito, ## Riesgos. "
         "Ancla las propuestas al contexto del Libro Vivo proporcionado."
     )
-    human_prompt = f"Tarea: {task_title}\n\nContexto del Libro Vivo:\n{context}"
 
+    context_block = ""
+    if libro_vivo_text:
+        context_block += f"## Libro Vivo (validado por CEO)\n{libro_vivo_text}\n\n"
+    if rag_context:
+        context_block += f"## Fragmentos RAG relevantes\n{rag_context}"
+
+    human_prompt = f"Tarea: {task_title}\n\n{context_block}" if context_block else f"Tarea: {task_title}"
+
+    # 4. Stream tokens to client
     llm = ChatOpenAI(model="gpt-4o", temperature=0)
     full_text = ""
 
@@ -359,15 +381,16 @@ async def _sse_artefact_stream(
     except Exception as exc:
         yield _sse_json({"type": "log", "text": f"\n\n[Error de generación: {exc}]"})
 
+    # 5. Persist to checkpointer (fetch-merge-write, non-fatal)
     try:
-        snapshot = await njm_graph.aget_state(config)
+        post_snapshot = await njm_graph.aget_state(config)
         current: dict = {}
-        if snapshot:
-            current = dict(snapshot.values.get("artefactos_generados") or {})
+        if post_snapshot:
+            current = dict(post_snapshot.values.get("artefactos_generados") or {})
         current[task_id] = full_text
         await njm_graph.aupdate_state(config, {"artefactos_generados": current})
-    except Exception:
-        pass
+    except Exception as _persist_exc:
+        yield _sse_json({"type": "log", "text": f"\n[!] No se pudo persistir artefacto: {_persist_exc}"})
 
     yield _sse_json({"type": "done"})
 

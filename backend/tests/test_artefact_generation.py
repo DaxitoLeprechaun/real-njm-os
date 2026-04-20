@@ -173,7 +173,10 @@ def test_sse_artefact_stream_persists_content(monkeypatch):
     )
 
     class FakeSnapshot:
-        values = {"artefactos_generados": {}}
+        values = {
+            "artefactos_generados": {},
+            "libro_vivo": {"posicionamiento": "Marca premium", "cac_objetivo": 120},
+        }
         next = []
 
     captured = {}
@@ -218,7 +221,10 @@ def test_sse_artefact_stream_merges_existing_artefacts(monkeypatch):
     )
 
     class FakeSnapshotWithExisting:
-        values = {"artefactos_generados": {"tarea-000": "contenido viejo"}}
+        values = {
+            "artefactos_generados": {"tarea-000": "contenido viejo"},
+            "libro_vivo": {"posicionamiento": "Marca premium", "cac_objetivo": 120},
+        }
         next = []
 
     captured = {}
