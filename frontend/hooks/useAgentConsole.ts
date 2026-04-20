@@ -9,6 +9,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 export interface AgentParams {
   brand_id: string;
   session_id: string;
+  task_id?: string;
+  task_title?: string;
 }
 
 export interface ActionRequiredEvent {
@@ -74,6 +76,8 @@ export function useAgentConsole(): UseAgentConsoleReturn {
       url.searchParams.set("sequenceId", sequenceId);
       url.searchParams.set("brand_id", brand_id);
       url.searchParams.set("session_id", session_id);
+      if (params.task_id)    url.searchParams.set("task_id", params.task_id);
+      if (params.task_title) url.searchParams.set("task_title", params.task_title);
 
       const es = new EventSource(url.toString());
       esRef.current = es;
