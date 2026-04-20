@@ -13,3 +13,5 @@ def test_artefactos_generados_field_in_state():
     assert origin is dict or str(raw).startswith("typing.Dict"), (
         f"artefactos_generados must be Dict[str, str], got {raw}"
     )
+    args = getattr(raw, "__args__", None)
+    assert args == (str, str), f"artefactos_generados must be Dict[str, str], got args={args}"
