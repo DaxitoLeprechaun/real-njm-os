@@ -489,6 +489,7 @@ async def get_session_state(
         "documentos_count": len(values.get("documentos_generados", [])),
         "next_interrupt": list(snapshot.next) if snapshot else [],
         "tasks": merged_tasks,
+        "artefactos_generados": values.get("artefactos_generados") or {},
     }
 
 

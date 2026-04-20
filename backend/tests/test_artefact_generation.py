@@ -247,3 +247,53 @@ def test_sse_artefact_stream_merges_existing_artefacts(monkeypatch):
     assert "tarea-000" in captured["artefactos_generados"]
     assert captured["artefactos_generados"]["tarea-000"] == "contenido viejo"
     assert "tarea-001" in captured["artefactos_generados"]
+
+
+def test_session_state_returns_artefactos_generados(monkeypatch):
+    _init()
+    from agent.njm_graph import njm_graph
+
+    class FakeSnapshot:
+        values = {
+            "audit_status": "COMPLETE",
+            "tareas_generadas": [],
+            "task_estado_overrides": {},
+            "artefactos_generados": {"tarea-001": "# Documento\n\nContenido guardado."},
+        }
+        next = []
+
+    async def fake_aget_state(config):
+        return FakeSnapshot()
+
+    monkeypatch.setattr(njm_graph, "aget_state", fake_aget_state)
+
+    from fastapi.testclient import TestClient
+    from main import app
+    with TestClient(app) as client:
+        res = client.get("/api/v1/session/state?brand_id=disrupt&session_id=dev-session-1")
+    assert res.status_code == 200
+    data = res.json()
+    assert "artefactos_generados" in data
+    assert data["artefactos_generados"]["tarea-001"] == "# Documento\n\nContenido guardado."
+
+
+def test_session_state_artefactos_empty_when_none(monkeypatch):
+    _init()
+    from agent.njm_graph import njm_graph
+
+    class FakeSnapshot:
+        values = {"audit_status": "PENDING"}
+        next = []
+
+    async def fake_aget_state(config):
+        return FakeSnapshot()
+
+    monkeypatch.setattr(njm_graph, "aget_state", fake_aget_state)
+
+    from fastapi.testclient import TestClient
+    from main import app
+    with TestClient(app) as client:
+        res = client.get("/api/v1/session/state?brand_id=disrupt&session_id=dev-session-1")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["artefactos_generados"] == {}
