@@ -106,6 +106,8 @@ class NJM_OS_State(TypedDict):
     # Maps task_id → EstadoTarea value. Updated by PATCH /api/v1/tasks/{id}.
     # No reducer: PATCH endpoint fetches + merges before writing.
 
+    artefactos_generados: Dict[str, str]
+
     # ── OUTPUT ─────────────────────────────────────────────────────
     payload_tarjeta_sugerencia: Optional[Dict[str, Any]]
     # TarjetaSugerenciaUI JSON. Emitido por output_node al finalizar el grafo.
